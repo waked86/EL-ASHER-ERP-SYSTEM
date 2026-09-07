@@ -1,0 +1,2 @@
+/* generic PDF export companion for report export controls */
+(function(){function addPdf(){document.querySelectorAll('#content button').forEach(b=>{if(!/تصدير/.test(b.textContent)||b.dataset.pdfAdded)return;b.dataset.pdfAdded='1';const p=document.createElement('button');p.className='btn ghost';p.textContent='PDF';p.style.marginInlineStart='6px';p.onclick=()=>{const c=document.querySelector('#content');printReport('تقرير النظام',c?c.innerHTML:'')};b.parentElement?.appendChild(p)})}setInterval(addPdf,1500);setTimeout(addPdf,1000)})();
