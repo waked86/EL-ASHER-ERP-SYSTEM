@@ -920,30 +920,43 @@ function getAllYears(){
   return Array.from(set).sort((a,b)=>a-b);
 }
 
-/* -------- financial aggregates (sales + collection + purchases + expenses), merged with live custom data -------- */
-function getFinanceSummary(yearFilter){
-  const ms = DATA.months_summary.filter(m=> !yearFilter || m.year===yearFilter);
+/* -------- financial aggregates (sales + collection + purchases + expenses), merged with live custom data --------
+   yearFilter: null = كل السنوات | رقم سنة = تلك السنة كاملة
+   monthFilter: رقم شهر (1-12) اختياري لتضييق الفلتر لشهر واحد داخل السنة */
+function getFinanceSummary(yearFilter, monthFilter){
+  const isPeriodFiltered = !!yearFilter; // مفلتر (سنة أو شهر) وليس "كل السنوات"
+  const datePrefix = yearFilter ? (String(yearFilter) + (monthFilter ? '-'+String(monthFilter).padStart(2,'0') : '')) : null;
+  const ms = DATA.months_summary.filter(m=> !yearFilter || (m.year===yearFilter && (!monthFilter || m.month===monthFilter)));
   const salesActual = ms.reduce((s,m)=>s+m.grand_total_sales.actual_val,0);
   const collectionActual = ms.reduce((s,m)=>s+m.collection.actual,0);
 
-  const customCollections = STORE.custom_txns.filter(t=>t.category==='تحصيل' && t.side==='credit' && (!yearFilter || (t.date&&t.date.startsWith(String(yearFilter))))).reduce((s,t)=>s+Number(t.amount||0),0);
-  const customSales = STORE.custom_txns.filter(t=>t.category==='فاتورة بيع' && t.side==='debit' && (!yearFilter || (t.date&&t.date.startsWith(String(yearFilter))))).reduce((s,t)=>s+Number(t.amount||0),0);
+  const customCollections = STORE.custom_txns.filter(t=>t.category==='تحصيل' && t.side==='credit' && (!datePrefix || (t.date&&t.date.startsWith(datePrefix)))).reduce((s,t)=>s+Number(t.amount||0),0);
+  const customSales = STORE.custom_txns.filter(t=>t.category==='فاتورة بيع' && t.side==='debit' && (!datePrefix || (t.date&&t.date.startsWith(datePrefix)))).reduce((s,t)=>s+Number(t.amount||0),0);
 
   const suppliers = getAllAccountsLight().filter(a=>a.type==='supplier');
-  const purchasesFromLedger = suppliers.reduce((s,a)=>s+a.total_debit,0); // approx, not year-filtered (legacy ledger has no reliable year)
-  const customPurchases = STORE.custom_txns.filter(t=>t.category==='فاتورة مشتريات' && t.side==='debit' && (!yearFilter || (t.date&&t.date.startsWith(String(yearFilter))))).reduce((s,t)=>s+Number(t.amount||0),0);
+  const purchasesFromLedger = suppliers.reduce((s,a)=>s+a.total_debit,0); // approx, not period-filtered (legacy ledger has no reliable date)
+  const customPurchases = STORE.custom_txns.filter(t=>t.category==='فاتورة مشتريات' && t.side==='debit' && (!datePrefix || (t.date&&t.date.startsWith(datePrefix)))).reduce((s,t)=>s+Number(t.amount||0),0);
 
-  const expenses = STORE.expenses.filter(e=> !yearFilter || (e.date && e.date.startsWith(String(yearFilter))));
+  const expenses = STORE.expenses.filter(e=> !datePrefix || (e.date && e.date.startsWith(datePrefix)));
   const totalExpenses = expenses.reduce((s,e)=>s+Number(e.amount||0),0);
 
   return {
     salesActual: salesActual + customSales,
     collectionActual: collectionActual + customCollections,
-    purchases: (yearFilter? customPurchases : purchasesFromLedger + customPurchases),
+    purchases: (isPeriodFiltered? customPurchases : purchasesFromLedger + customPurchases),
     expenses: totalExpenses,
     expensesByCategory: groupBy(expenses, e=>e.category, e=>Number(e.amount||0)),
-    netCash: (collectionActual + customCollections) - totalExpenses - (yearFilter? customPurchases : purchasesFromLedger + customPurchases),
+    netCash: (collectionActual + customCollections) - totalExpenses - (isPeriodFiltered? customPurchases : purchasesFromLedger + customPurchases),
   };
+}
+const AR_MONTHS = ['يناير','فبراير','مارس','إبريل','مايو','يونيه','يوليه','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+function lastMonthPeriod(){
+  const d = new Date(); d.setDate(1); d.setMonth(d.getMonth()-1);
+  return {year: d.getFullYear(), month: d.getMonth()+1};
+}
+function currentMonthPeriod(){
+  const d = new Date();
+  return {year: d.getFullYear(), month: d.getMonth()+1};
 }
 function groupBy(arr, keyFn, valFn){
   const out = {};
@@ -1226,21 +1239,35 @@ const EXPENSE_CATS = ['رواتب وأجور','خامات ومستلزمات','�
 
 /* ============ FINANCE & EXPENSES ============ */
 function renderFinance(el){
-  renderFinanceBody(el, 'all');
+  const lm = lastMonthPeriod();
+  renderFinanceBody(el, 'month:'+lm.year+'-'+String(lm.month).padStart(2,'0'));
 }
-function renderFinanceBody(el, yearSel){
+function renderFinanceBody(el, periodSel){
   const years = getAllYears();
-  const yf = yearSel==='all' ? null : Number(yearSel);
-  const fin = getFinanceSummary(yf);
-  const expenses = STORE.expenses.filter(e=> !yf || (e.date && e.date.startsWith(String(yf)))).slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  let yf = null, mf = null, periodLabel = 'كل السنوات';
+  if(periodSel.startsWith('month:')){
+    const [y,m] = periodSel.slice(6).split('-').map(Number);
+    yf = y; mf = m; periodLabel = AR_MONTHS[m-1] + ' ' + y;
+  } else if(periodSel.startsWith('year:')){
+    yf = Number(periodSel.slice(5)); periodLabel = 'سنة ' + yf;
+  }
+  const fin = getFinanceSummary(yf, mf);
+  const datePrefix = yf ? (String(yf) + (mf? '-'+String(mf).padStart(2,'0') : '')) : null;
+  const expenses = STORE.expenses.filter(e=> !datePrefix || (e.date && e.date.startsWith(datePrefix))).slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+
+  const lm = lastMonthPeriod(), cm = currentMonthPeriod();
+  const lmVal = 'month:'+lm.year+'-'+String(lm.month).padStart(2,'0');
+  const cmVal = 'month:'+cm.year+'-'+String(cm.month).padStart(2,'0');
 
   el.innerHTML = `
     <div class="section-eyebrow">💰 الإدارة المالية</div>
-    <div class="section-title">نظرة مالية شاملة: مبيعات · تحصيل · مشتريات · مصروفات</div>
+    <div class="section-title">نظرة مالية شاملة: مبيعات · تحصيل · مشتريات · مصروفات — ${periodLabel}</div>
     <div class="toolbar">
-      <select class="field" id="fin-year">
-        <option value="all" ${yearSel==='all'?'selected':''}>كل السنوات</option>
-        ${years.map(y=>`<option value="${y}" ${String(y)===String(yearSel)?'selected':''}>${y}</option>`).join('')}
+      <select class="field" id="fin-period">
+        <option value="${lmVal}" ${periodSel===lmVal?'selected':''}>الشهر السابق (${AR_MONTHS[lm.month-1]} ${lm.year})</option>
+        <option value="${cmVal}" ${periodSel===cmVal?'selected':''}>الشهر الحالي (${AR_MONTHS[cm.month-1]} ${cm.year})</option>
+        ${years.map(y=>`<option value="year:${y}" ${periodSel==='year:'+y?'selected':''}>سنة ${y} كاملة</option>`).join('')}
+        <option value="all" ${periodSel==='all'?'selected':''}>كل السنوات</option>
       </select>
       <button class="btn ghost" style="margin-right:auto" onclick="exportBackup()">⬇ تنزيل نسخة احتياطية من كل البيانات المُضافة</button>
       <label class="btn ghost" style="cursor:pointer">⬆ استرجاع نسخة احتياطية
@@ -1272,10 +1299,10 @@ function renderFinanceBody(el, yearSel){
       </div>
       <div class="scroll-table" style="max-height:340px"><table><thead><tr><th>التاريخ</th><th>النوع</th><th>البيان</th><th>المبلغ</th><th></th></tr></thead><tbody id="exp-body">
       ${expenses.map(e=>`<tr><td class="nums">${e.date}</td><td><span class="pill slate">${e.category}</span></td><td>${e.description||'-'}</td><td class="nums" style="font-weight:700;color:var(--danger)">${fmtEGP(e.amount)}</td>
-      <td><button class="btn ghost" style="padding:4px 10px;font-size:11.5px;color:var(--danger)" onclick="deleteExpense('${e.id}'); document.getElementById('fin-year').dispatchEvent(new Event('change'));">حذف</button></td></tr>`).join('') || '<tr><td colspan="5" class="empty-note">لا توجد مصروفات مسجلة لهذه الفترة</td></tr>'}
+      <td><button class="btn ghost" style="padding:4px 10px;font-size:11.5px;color:var(--danger)" onclick="deleteExpense('${e.id}'); document.getElementById('fin-period').dispatchEvent(new Event('change'));">حذف</button></td></tr>`).join('') || '<tr><td colspan="5" class="empty-note">لا توجد مصروفات مسجلة لهذه الفترة</td></tr>'}
       </tbody></table></div>
     </div>
-    <div class="small-note">"إجمالي المشتريات" عند اختيار "كل السنوات" يشمل كامل تاريخ حسابات الموردين المستوردة من الأرشيف، أما عند اختيار سنة معينة فيعرض فقط فواتير المشتريات المُضافة يدوياً في هذا النظام لتلك السنة (الأرشيف القديم غير مؤرشف بسنة موثوقة لكل حركة).</div>
+    <div class="small-note">"إجمالي المشتريات" عند اختيار "كل السنوات" يشمل كامل تاريخ حسابات الموردين المستوردة من الأرشيف، أما عند اختيار شهر أو سنة معينة فيعرض فقط فواتير المشتريات المُضافة يدوياً في هذا النظام لتلك الفترة (الأرشيف القديم غير مؤرشف بتاريخ موثوق لكل حركة).</div>
   `;
 
   destroyChart('fin-exp');
@@ -1293,7 +1320,7 @@ function renderFinanceBody(el, yearSel){
     options:{ plugins:{legend:{display:false}}, scales:{y:{ticks:{callback:v=>fmt(v)}}} }
   });
 
-  document.getElementById('fin-year').addEventListener('change', e=>{
+  document.getElementById('fin-period').addEventListener('change', e=>{
     renderFinanceBody(el, e.target.value);
   });
 }
