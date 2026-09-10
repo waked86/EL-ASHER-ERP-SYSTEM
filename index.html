@@ -237,7 +237,8 @@
     </div>
   </div>
   <nav id="nav">
-    <button data-tab="overview" class="active"><span class="ic">◧</span> نظرة عامة</button>
+    <button data-tab="daily_report" class="active"><span class="ic">📅</span> تحليل اليوم</button>
+    <button data-tab="overview"><span class="ic">◧</span> نظرة عامة</button>
     <button data-tab="sales"><span class="ic">🧾</span> المبيعات</button>
     <button data-tab="customers"><span class="ic">👤</span> العملاء</button>
     <button data-tab="purchases"><span class="ic">🛒</span> المشتريات</button>
@@ -305,6 +306,7 @@ function destroyChart(id){ if(charts[id]){ charts[id].destroy(); delete charts[i
 
 /* ===================== ROUTER ===================== */
 const PAGES = {
+  daily_report: {title:"تحليل اليوم", sub:"ملخص يومي شامل لكل حركة في المصنع - قابل للطباعة والتصدير PDF", render: renderDailyReport},
   overview: {title:"نظرة عامة", sub:"أداء المصنع التجاري والتشغيلي بنظرة واحدة", render: renderOverview},
   sales: {title:"المبيعات", sub:"إنشاء فاتورة بيع تفصيلية وتقرير مبسط حسب الصنف/المقاس", render: renderSales},
   customers: {title:"العملاء", sub:"دليل العملاء وتسجيل التحصيل", render: renderCustomers},
@@ -958,6 +960,109 @@ function currentMonthPeriod(){
   const d = new Date();
   return {year: d.getFullYear(), month: d.getMonth()+1};
 }
+/* -------- التقرير اليومي (تحليل اليوم) - ملخص شامل لكل حركة في اليوم المختار -------- */
+function renderDailyReport(el){
+  renderDailyReportBody(el, todayISO());
+}
+function getDailyReportData(d){
+  const dayName = new Date(d+'T00:00:00').toLocaleDateString('ar-EG', {weekday:'long'});
+
+  const rawInQty = STORE.inventory_moves.filter(m=>{
+    if(m.date!==d || m.direction!=='in') return false;
+    const item = STORE.inventory_items.find(i=>i.id===m.item_id);
+    return item && item.type==='raw';
+  }).reduce((s,m)=>s+Number(m.qty||0),0);
+
+  const estToday = STORE.maintenance_estimates.filter(m=>m.date===d);
+  const estResponded = estToday.filter(m=>m.status!=='مقايسة').length;
+
+  const palletsIn = STORE.inventory_moves.filter(m=>{
+    if(m.date!==d || m.direction!=='in') return false;
+    const item = STORE.inventory_items.find(i=>i.id===m.item_id);
+    return item && item.type==='finished';
+  }).reduce((s,m)=>s+Number(m.qty||0),0);
+
+  const salesToday = STORE.custom_txns.filter(t=>t.category==='فاتورة بيع' && t.date===d);
+  const palletsOut = salesToday.reduce((s,t)=>s+(t.items||[]).reduce((s2,it)=>s2+Number(it.qty||0),0),0);
+
+  const expToday = STORE.expenses.filter(e=>e.date===d);
+  const expTotal = expToday.reduce((s,e)=>s+Number(e.amount||0),0);
+
+  const advToday = STORE.advances.filter(a=>a.date===d);
+  const advTotal = advToday.reduce((s,a)=>s+Number(a.amount||0),0);
+
+  const purToday = STORE.custom_txns.filter(t=>t.category==='فاتورة مشتريات' && t.date===d);
+  const purTotal = purToday.reduce((s,t)=>s+Number(t.amount||0),0);
+
+  const attToday = STORE.attendance.filter(a=>a.date===d);
+  const present = attToday.filter(a=>a.status==='حاضر').length;
+  const absent = attToday.filter(a=>a.status!=='حاضر').length;
+
+  const collToday = STORE.custom_txns.filter(t=>t.category==='تحصيل' && t.side==='credit' && t.date===d).reduce((s,t)=>s+Number(t.amount||0),0);
+  const salesTotal = salesToday.reduce((s,t)=>s+Number(t.amount||0),0);
+
+  return {d, dayName, rawInQty, estToday, estResponded, palletsIn, palletsOut, expToday, expTotal, advToday, advTotal, purToday, purTotal, present, absent, collToday, salesTotal};
+}
+function renderDailyReportBody(el, dateSel){
+  const x = getDailyReportData(dateSel);
+  el.innerHTML = `
+    <div class="section-eyebrow">📅 تحليل اليوم</div>
+    <div class="section-title">ملخص شامل ليوم واحد - كل الحركات في مكان واحد</div>
+    <div class="toolbar">
+      <input class="field" type="date" id="daily-date" value="${x.d}">
+      <button class="btn" style="margin-right:auto" onclick="printDailyReport('${x.d}')">🖨 طباعة / تصدير PDF</button>
+    </div>
+    <div id="daily-print-area">${dailyReportContentHtml(x)}</div>
+  `;
+  document.getElementById('daily-date').addEventListener('change', e=>{
+    renderDailyReportBody(el, e.target.value);
+  });
+}
+function dailyReportContentHtml(x){
+  return `
+      <div class="kpi-row">
+        <div class="kpi"><div class="lbl">المبيعات</div><div class="val">${fmtEGP(x.salesTotal)}</div></div>
+        <div class="kpi"><div class="lbl">التحصيل</div><div class="val" style="color:var(--success)">${fmtEGP(x.collToday)}</div></div>
+        <div class="kpi"><div class="lbl">المشتريات</div><div class="val" style="color:var(--wood)">${fmtEGP(x.purTotal)}</div></div>
+        <div class="kpi"><div class="lbl">المصروفات</div><div class="val" style="color:var(--danger)">${fmtEGP(x.expTotal)}</div></div>
+        <div class="kpi"><div class="lbl">السلف</div><div class="val" style="color:var(--danger)">${fmtEGP(x.advTotal)}</div></div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h3>الإنتاج والمخزون</h3>
+          <table><tbody>
+            <tr><td>شكاير/معدة خامات داخلة</td><td class="nums" style="font-weight:800">${fmt(x.rawInQty)}</td></tr>
+            <tr><td>بالتات دخلت المخزن (إنتاج تام)</td><td class="nums" style="font-weight:800">${fmt(x.palletsIn)}</td></tr>
+            <tr><td>بالتات خرجات (فواتير بيع)</td><td class="nums" style="font-weight:800">${fmt(x.palletsOut)}</td></tr>
+          </tbody></table>
+        </div>
+        <div class="card">
+          <h3>المقايسات والحضور</h3>
+          <table><tbody>
+            <tr><td>مقايسات صيانة اتعملت اليوم</td><td class="nums" style="font-weight:800">${fmt(x.estToday.length)}</td></tr>
+            <tr><td>منها تم الرد عليها</td><td class="nums" style="font-weight:800">${fmt(x.estResponded)}</td></tr>
+            <tr><td>عمال حاضرين</td><td class="nums" style="font-weight:800;color:var(--success)">${fmt(x.present)}</td></tr>
+            <tr><td>عمال غائبين</td><td class="nums" style="font-weight:800;color:var(--danger)">${fmt(x.absent)}</td></tr>
+          </tbody></table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>تفاصيل مصروفات وسلف اليوم</h3>
+        <div class="scroll-table" style="max-height:260px"><table><thead><tr><th>النوع</th><th>البيان</th><th>المبلغ</th></tr></thead><tbody>
+        ${x.expToday.map(e=>`<tr><td><span class="pill slate">${e.category}</span></td><td>${e.description||'-'}</td><td class="nums" style="color:var(--danger);font-weight:700">${fmtEGP(e.amount)}</td></tr>`).join('')}
+        ${x.advToday.map(a=>`<tr><td><span class="pill slate">سلفة</span></td><td>${empName(a.emp_id)}${a.note?' - '+a.note:''}</td><td class="nums" style="color:var(--danger);font-weight:700">${fmtEGP(a.amount)}</td></tr>`).join('')}
+        ${(x.expToday.length+x.advToday.length)===0?'<tr><td colspan="3" class="empty-note">لا توجد مصروفات أو سلف مسجلة اليوم</td></tr>':''}
+        </tbody></table></div>
+      </div>
+  `;
+}
+function printDailyReport(d){
+  const x = getDailyReportData(d);
+  printReport('تحليل اليوم - ' + d, `<div class="section-title">يوم ${x.dayName} - ${d}</div>` + dailyReportContentHtml(x));
+}
+function empName(emp_id){ const e = STORE.employees.find(x=>x.id===emp_id); return e? e.name : '-'; }
 function groupBy(arr, keyFn, valFn){
   const out = {};
   arr.forEach(x=>{ const k=keyFn(x); out[k]=(out[k]||0)+valFn(x); });
@@ -14015,7 +14120,7 @@ function importCustomerMasterData(){
 
 
 updateLiveClock();
-goTo('overview');
+goTo('daily_report');
 </script>
 <script>
 (function(){
