@@ -91,6 +91,19 @@
     border-radius:10px; padding:8px 14px; width:290px;
   }
   #search-box input{ all:unset; flex:1; font-family:'Cairo'; font-size:13.5px; }
+  #notif-bell{ position:relative; background:var(--paper); border:1px solid var(--line); border-radius:10px; width:42px; height:42px; font-size:18px; cursor:pointer; }
+  #notif-badge{ position:absolute; top:-4px; left:-4px; background:var(--danger); color:#fff; font-size:10px; font-weight:800; min-width:17px; height:17px; border-radius:50%; display:none; align-items:center; justify-content:center; padding:0 3px; }
+  #notif-badge.show{ display:flex; }
+  #notif-panel{ display:none; position:absolute; top:52px; left:0; width:340px; max-height:420px; overflow-y:auto; background:var(--card); border:1px solid var(--line); border-radius:12px; box-shadow:0 8px 28px rgba(0,0,0,.15); z-index:50; padding:8px; }
+  #notif-panel.show{ display:block; }
+  #notif-panel h4{ margin:6px 8px; font-size:13px; color:var(--navy); }
+  .notif-item{ display:flex; flex-direction:column; gap:3px; padding:9px 10px; border-radius:8px; margin-bottom:4px; background:var(--paper); font-size:12.5px; }
+  .notif-item .notif-title{ font-weight:700; }
+  .notif-item .notif-meta{ color:var(--slate); font-size:11px; }
+  .notif-item .notif-actions{ display:flex; gap:6px; margin-top:4px; }
+  .notif-item .notif-actions button{ font-size:11px; padding:3px 8px; border-radius:6px; border:1px solid var(--line); background:#fff; cursor:pointer; }
+  .notif-empty{ padding:20px; text-align:center; color:var(--slate); font-size:12.5px; }
+  @media (max-width:720px){ #notif-panel{ left:auto; right:0; width:90vw; } }
   #content{ padding:24px 28px 60px; max-width:1400px; }
 
   .section-eyebrow{ display:flex; align-items:center; gap:8px; color:var(--wood); font-weight:700; font-size:12.5px; letter-spacing:.5px; margin-bottom:6px; text-transform:uppercase;}
@@ -263,6 +276,10 @@
     <div id="search-box">
       <span>🔎</span>
       <input id="global-search" placeholder="ابحث عن عميل أو مورد بالاسم...">
+    </div>
+    <div id="notif-wrap" style="position:relative">
+      <button id="notif-bell" title="الإشعارات والمتابعات">🔔<span id="notif-badge"></span></button>
+      <div id="notif-panel"></div>
     </div>
   </div>
   <div id="content"></div>
@@ -3192,10 +3209,16 @@ function renderDraftSaleItems(){
     <tr><td>${it.desc}</td><td class="nums">${fmt(it.qty)}</td><td class="nums">${fmtEGP(it.price)}</td><td class="nums">${fmtEGP(it.qty*it.price)}</td>
     <td><button class="btn ghost" style="padding:3px 9px;font-size:11px;color:var(--danger)" onclick="removeDraftSaleItem(${i})">حذف</button></td></tr>
   `).join('') || '<tr><td colspan="5" class="empty-note">لم تُضف أصناف بعد لهذه الفاتورة</td></tr>';
-  const total = SALE_DRAFT_ITEMS.reduce((s,it)=>s+it.qty*it.price,0);
+  const subtotal = SALE_DRAFT_ITEMS.reduce((s,it)=>s+it.qty*it.price,0);
+  const subEl = document.getElementById('sale-subtotal');
+  if(subEl) subEl.textContent = fmtEGP(subtotal);
+  const rateEl = document.getElementById('sale-vat-rate');
+  const rate = rateEl ? Number(rateEl.value)||0 : 0;
+  const vat = subtotal * rate/100;
   const totalEl = document.getElementById('sale-grand-total');
-  if(totalEl) totalEl.textContent = fmtEGP(total);
+  if(totalEl) totalEl.textContent = fmtEGP(subtotal + vat);
 }
+function recalcSaleTotal(){ renderDraftSaleItems(); }
 function addDraftSaleItem(){
   const desc = document.getElementById('item-desc').value.trim();
   const qty = parseFloat(document.getElementById('item-qty').value);
@@ -8964,7 +8987,16 @@ function renderSalesInvoiceSub(el){
       </div>
       <div class="scroll-table" style="max-height:220px; margin-top:10px"><table><thead><tr><th>الكود</th><th>الصنف</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th><th></th></tr></thead><tbody id="sale-items-body"></tbody></table></div>
       <div class="flex-between" style="margin-top:10px">
-        <div class="section-eyebrow" style="margin:0">إجمالي الفاتورة: <span class="nums" id="sale-grand-total" style="color:var(--ink);font-weight:900;font-size:16px">0 ج.م</span></div>
+        <div class="section-eyebrow" style="margin:0">إجمالي الأصناف: <span class="nums" id="sale-subtotal" style="color:var(--ink);font-weight:700;font-size:14px">0 ج.م</span></div>
+      </div>
+      <div class="toolbar" style="margin-top:8px">
+        <label class="small-note">نسبة الضريبة:</label>
+        <select class="field" id="sale-vat-rate" style="width:220px" onchange="recalcSaleTotal()">
+          <option value="0">بدون ضريبة</option>
+          <option value="14">ضريبة قيمة مضافة 14%</option>
+          <option value="1">خصم تحت حساب الضريبة 1%</option>
+        </select>
+        <div class="section-eyebrow" style="margin:0 0 0 auto">الإجمالي شامل الضريبة: <span class="nums" id="sale-grand-total" style="color:var(--ink);font-weight:900;font-size:16px">0 ج.م</span></div>
       </div>
       <input class="field" id="sale-note" placeholder="ملاحظات" style="width:100%; margin:12px 0">
       <button class="btn" onclick="submitSaleInvoice()">حفظ الفاتورة</button>
@@ -9004,7 +9036,10 @@ function submitSaleInvoice(){
   if(!typed){ alert('اكتب اسم العميل'); return; }
   const resolved = resolveAccountByName(typed, 'customer');
   const items = SALE_DRAFT_ITEMS.map(it=>({desc:it.desc, qty:it.qty, unit_price:it.price, total:it.qty*it.price}));
-  const amount = items.reduce((s,it)=>s+it.total,0);
+  const subtotal = items.reduce((s,it)=>s+it.total,0);
+  const vatRate = Number(document.getElementById('sale-vat-rate')?.value)||0;
+  const vat = subtotal * vatRate/100;
+  const amount = subtotal + vat;
   const descSummary = items.map(it=>it.desc+' ×'+it.qty).join('، ');
 
   const sheet = addTxn({
@@ -9014,6 +9049,7 @@ function submitSaleInvoice(){
   });
   const last = STORE.custom_txns[STORE.custom_txns.length-1];
   last.items = items;
+  last.subtotal = subtotal; last.vat_rate = vatRate; last.vat = vat;
   if(document.getElementById('sale-note').value) last.note = document.getElementById('sale-note').value;
   saveStore();
   if(resolved.isNew){
@@ -10507,7 +10543,6 @@ function renderPriceQuoteSub(el){
       <div class="toolbar" style="margin-top:8px; flex-wrap:wrap">
         <input class="field" id="ci-email" value="${ci.email}" placeholder="البريد الإلكتروني" style="flex:1;min-width:180px">
         <input class="field" id="ci-address" value="${ci.address}" placeholder="العنوان" style="flex:1;min-width:220px">
-        <input class="field" id="ci-manager" value="${ci.sales_manager}" placeholder="اسم مدير المبيعات" style="width:200px">
       </div>
       <button class="btn ghost" style="margin-top:10px" onclick="saveCompanyInfo()">حفظ بيانات الشركة</button>
     </div>
@@ -10565,7 +10600,6 @@ function saveCompanyInfo(){
     phone: document.getElementById('ci-phone').value.trim(),
     email: document.getElementById('ci-email').value.trim(),
     address: document.getElementById('ci-address').value.trim(),
-    sales_manager: document.getElementById('ci-manager').value.trim(),
   };
   saveStore();
   alert('تم حفظ بيانات الشركة');
@@ -10671,7 +10705,7 @@ function printQuote(id){
       </div>
 
       <div style="margin-top:36px;display:flex;justify-content:space-between;font-size:13px;">
-        <div>مع خالص التحية،<br><b>${ci.sales_manager}</b><br>مدير المبيعات</div>
+        <div>مع خالص التحية،<br><b>${ci.name}</b><br>إدارة المبيعات</div>
       </div>
     </div>
   </div>`;
@@ -10997,7 +11031,6 @@ function renderPriceQuoteSub(el){
       <div class="toolbar" style="margin-top:8px; flex-wrap:wrap">
         <input class="field" id="ci-email" value="${ci.email}" placeholder="البريد الإلكتروني" style="flex:1;min-width:180px">
         <input class="field" id="ci-address" value="${ci.address}" placeholder="العنوان" style="flex:1;min-width:220px">
-        <input class="field" id="ci-manager" value="${ci.sales_manager}" placeholder="اسم مدير المبيعات" style="width:200px">
       </div>
       <button class="btn ghost" style="margin-top:10px" onclick="saveCompanyInfo()">حفظ بيانات الشركة</button>
     </div>
@@ -11069,7 +11102,6 @@ function saveCompanyInfo(){
     phone: document.getElementById('ci-phone').value.trim(),
     email: document.getElementById('ci-email').value.trim(),
     address: document.getElementById('ci-address').value.trim(),
-    sales_manager: document.getElementById('ci-manager').value.trim(),
   };
   saveStore();
   alert('تم حفظ بيانات الشركة');
@@ -11181,7 +11213,7 @@ function printQuote(id){
       </div>
 
       <div style="margin-top:36px;display:flex;justify-content:space-between;font-size:13px;">
-        <div>مع خالص التحية،<br><b>${ci.sales_manager}</b><br>مدير المبيعات</div>
+        <div>مع خالص التحية،<br><b>${ci.name}</b><br>إدارة المبيعات</div>
       </div>
     </div>
   </div>`;
@@ -11237,6 +11269,14 @@ function renderMaintenanceEstimateSub(el){
 
       <div id="mnt-units-list" style="margin-top:14px"></div>
       <div class="section-eyebrow" style="margin-top:10px">إجمالي المقايسة (قبل الضريبة): <span class="nums" id="mnt-subtotal" style="color:var(--ink);font-weight:900;font-size:16px">0 ج.م</span></div>
+      <div class="toolbar" style="margin-top:8px">
+        <label class="small-note">نسبة الضريبة:</label>
+        <select class="field" id="mnt-vat-rate" style="width:220px">
+          <option value="0">بدون ضريبة</option>
+          <option value="14">ضريبة قيمة مضافة 14%</option>
+          <option value="1">خصم تحت حساب الضريبة 1%</option>
+        </select>
+      </div>
       <button class="btn" style="margin-top:14px" onclick="submitMaintenanceEstimate()">حفظ المقايسة</button>
       <div class="small-note" style="margin-top:8px">المقايسة لا تُسجَّل كدين على العميل مباشرة - فقط عند تحويلها لفاتورة صيانة بعد الموافقة.</div>
     </div>
@@ -11306,7 +11346,8 @@ function submitMaintenanceEstimate(){
   if(!typed){ alert('اكتب اسم العميل'); return; }
   const resolved = resolveAccountByName(typed, 'customer');
   const subtotal = MNT_DRAFT_UNITS.reduce((s,u)=>s+u.price,0);
-  const vat = subtotal*0.14;
+  const vatRate = Number(document.getElementById('mnt-vat-rate')?.value)||0;
+  const vat = subtotal*vatRate/100;
   const total_with_vat = subtotal+vat;
   const doc_no = nextDocNumber('maintenance_estimate');
   let sheet = resolved.isNew ? null : resolved.sheet;
@@ -11315,7 +11356,7 @@ function submitMaintenanceEstimate(){
     id: uid('mnt'), doc_no, customer_sheet: sheet, customer_name: resolved.name,
     attn: document.getElementById('mnt-attn').value.trim(), mobile: document.getElementById('mnt-mobile').value.trim(),
     date: document.getElementById('mnt-date').value, units: MNT_DRAFT_UNITS.slice(),
-    subtotal, vat, total_with_vat, total: total_with_vat,
+    subtotal, vat_rate: vatRate, vat, total_with_vat, total: total_with_vat,
     status:'مقايسة', invoiced:false, images: MNT_DRAFT_IMAGES_V2.slice(),
     receipt_no: MNT_LINKED_RECEIPT ? MNT_LINKED_RECEIPT.doc_no : '',
     receipt_date: MNT_LINKED_RECEIPT ? MNT_LINKED_RECEIPT.date : '',
@@ -11390,7 +11431,7 @@ function printMaintenanceEstimate(id){
         <div style="font-weight:800;margin-bottom:4px;">الشروط والأحكام:</div>
         ${MAINT_TERMS.map(t=>`<div>• ${t}</div>`).join('')}
       </div>
-      <div style="margin-top:36px;font-size:13px;">مع خالص التحية،<br><b>${STORE.company_info.sales_manager}</b><br>مدير المبيعات</div>
+      <div style="margin-top:36px;font-size:13px;">مع خالص التحية،<br><b>${STORE.company_info.name}</b><br>إدارة المبيعات</div>
     </div>
   </div>`;
   printReport('مقايسة صيانة رقم ' + m.doc_no, html);
@@ -12161,6 +12202,7 @@ SECTIONS.customers.subs.push({key:'pipeline', label:'خط أنابيب العم�
 
 SECTIONS.sales.subs.find(s=>s.key==='monthly_breakdown').render = renderMonthlySalesBreakdownSub;
 SECTIONS.image_library = {title:"مكتبة صور المنتجات", sub:"صور مصنّفة (خشب/هيدروليك) لإعادة استخدامها في العروض والمقايسات وأوامر الإنتاج", standalone:true, render: renderImageLibrarySub};
+SECTIONS.daily_report = {title:"تحليل اليوم", sub:"ملخص يومي شامل لكل حركة في المصنع - قابل للطباعة والتصدير PDF", standalone:true, render: renderDailyReport};
 
 
 
@@ -14349,17 +14391,33 @@ goTo('daily_report');
 })();
 </script>
 <script>
-/* v37: prevent native customer list from opening before search */
+/* v37: prevent native customer/supplier list from popping up in the wrong place (RTL bug) -
+   generalized to EVERY input[list^="dl-"] across the whole app (not just 3 fixed fields),
+   using the same live-scan approach as the customer info panel below. */
 (function(){
- const ids=[['sale-customer','dl-sale-customers'],['mnt-customer','dl-mnt-customers'],['coll-customer','dl-coll-customers']];
- function listFor(id){return typeof getAllAccountsLight==='function'?getAllAccountsLight().filter(a=>a.type==='customer'):[]}
+ function listAccounts(type){return typeof getAllAccountsLight==='function'?getAllAccountsLight().filter(a=>a.type===type):[]}
  function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
- function prepare(input,list){if(!input||!list)return;input.removeAttribute('list');list.innerHTML='';input.dataset.lazyCustomer='1'}
- function update(input,list){const q=(input.value||'').trim().toLowerCase();if(q.length<2){input.removeAttribute('list');list.innerHTML='';return}const rows=listFor().filter(a=>(a.name||'').toLowerCase().includes(q)||String(a.code||'').toLowerCase().includes(q)).slice(0,12);list.innerHTML=rows.map(a=>`<option value="${esc(a.name)}">${esc(a.code||'')} | ${esc(a.name)}</option>`).join('');if(rows.length)input.setAttribute('list',list.id);else input.removeAttribute('list')}
- function bind(){ids.forEach(([ii,li])=>{const input=document.getElementById(ii),list=document.getElementById(li);prepare(input,list)})}
- document.addEventListener('focusin',e=>{if(ids.some(x=>x[0]===e.target.id)){const list=document.getElementById(ids.find(x=>x[0]===e.target.id)[1]);prepare(e.target,list)}},true);
- document.addEventListener('input',e=>{const pair=ids.find(x=>x[0]===e.target.id);if(pair){const list=document.getElementById(pair[1]);update(e.target,list)}},true);
- setTimeout(bind,0);setTimeout(bind,150);setTimeout(bind,500);
+ function prepare(input){
+   if(!input || input.dataset.lazyCustomer) return;
+   const listId = input.getAttribute('list'); if(!listId) return;
+   const list = document.getElementById(listId); if(!list) return;
+   input.removeAttribute('list'); list.innerHTML=''; input.dataset.lazyCustomer='1'; input.dataset.lazyListId=listId;
+ }
+ function update(input){
+   const listId = input.dataset.lazyListId; const list = document.getElementById(listId); if(!list) return;
+   const type = listId.indexOf('supplier')>-1 ? 'supplier' : 'customer';
+   const q = (input.value||'').trim().toLowerCase();
+   if(q.length<2){ input.removeAttribute('list'); list.innerHTML=''; return; }
+   const rows = listAccounts(type).filter(a=>(a.name||'').toLowerCase().includes(q)||String(a.code||'').toLowerCase().includes(q)).slice(0,12);
+   list.innerHTML = rows.map(a=>`<option value="${esc(a.name)}">${esc(a.code||'')} | ${esc(a.name)}</option>`).join('');
+   if(rows.length) input.setAttribute('list', listId); else input.removeAttribute('list');
+ }
+ function scan(){ document.querySelectorAll('#content input[list^="dl-"]').forEach(prepare); }
+ document.addEventListener('focusin', e=>{ if(e.target && e.target.tagName==='INPUT' && e.target.dataset.lazyCustomer) prepare(e.target); }, true);
+ document.addEventListener('input', e=>{ if(e.target && e.target.dataset.lazyCustomer) update(e.target); }, true);
+ const container = document.getElementById('content');
+ if(container){ new MutationObserver(scan).observe(container, {childList:true, subtree:true}); }
+ setTimeout(scan,0); setTimeout(scan,150); setTimeout(scan,500);
 })();
 </script>
 <script>
