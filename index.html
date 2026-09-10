@@ -4159,7 +4159,7 @@ function printReport(title, bodyHtml, skipDefaultHeader){
       table { page-break-inside: auto; }
       tr { page-break-inside: avoid; }
       thead { display: table-header-group; }
-      @page { margin: 10mm; }
+      @page { size: A4; margin: 10mm; }
     }
   </style></head><body>
   <div class="pdf-toolbar">
@@ -5400,8 +5400,8 @@ function renderSalesInvoiceSub(el){
     <div class="card" style="margin-top:16px">
       <div class="flex-between"><h3 style="margin-bottom:0">أرشيف فواتير DSR القديمة <span class="tag">${archiveSales.length} فاتورة (يناير 2025 - يونيه 2026)</span></h3></div>
       <div class="toolbar" style="margin-top:10px; flex-wrap:wrap">
-        <label class="small-note">من:</label><input class="field" type="date" id="arc-from" value="2025-01-01">
-        <label class="small-note">إلى:</label><input class="field" type="date" id="arc-to" value="2026-06-30">
+        <label class="small-note">من:</label><input class="field" type="date" id="arc-from" value="${(()=>{const lm=lastMonthPeriod();return lm.year+'-'+String(lm.month).padStart(2,'0')+'-01';})()}">
+        <label class="small-note">إلى:</label><input class="field" type="date" id="arc-to" value="${(()=>{const lm=lastMonthPeriod();const last=new Date(lm.year,lm.month,0).getDate();return lm.year+'-'+String(lm.month).padStart(2,'0')+'-'+String(last).padStart(2,'0');})()}">
         <input class="field" id="arc-search" placeholder="ابحث باسم العميل أو الصنف..." style="flex:1;min-width:180px">
         <button class="btn" onclick="runArchiveInvoices()">عرض</button>
         <button class="btn ghost" id="arc-print">🖨️ طباعة</button>
@@ -8985,8 +8985,8 @@ function renderSalesInvoiceSub(el){
     <div class="card" style="margin-top:16px">
       <div class="flex-between"><h3 style="margin-bottom:0">أرشيف فواتير DSR القديمة <span class="tag">${archiveSales.length} فاتورة (يناير 2025 - يونيه 2026)</span></h3></div>
       <div class="toolbar" style="margin-top:10px; flex-wrap:wrap">
-        <label class="small-note">من:</label><input class="field" type="date" id="arc-from" value="2025-01-01">
-        <label class="small-note">إلى:</label><input class="field" type="date" id="arc-to" value="2026-06-30">
+        <label class="small-note">من:</label><input class="field" type="date" id="arc-from" value="${(()=>{const lm=lastMonthPeriod();return lm.year+'-'+String(lm.month).padStart(2,'0')+'-01';})()}">
+        <label class="small-note">إلى:</label><input class="field" type="date" id="arc-to" value="${(()=>{const lm=lastMonthPeriod();const last=new Date(lm.year,lm.month,0).getDate();return lm.year+'-'+String(lm.month).padStart(2,'0')+'-'+String(last).padStart(2,'0');})()}">
         <input class="field" id="arc-search" placeholder="ابحث باسم العميل أو الصنف..." style="flex:1;min-width:180px">
         <button class="btn" onclick="runArchiveInvoices()">عرض</button>
         <button class="btn ghost" id="arc-print">🖨️ طباعة</button>
@@ -14293,7 +14293,8 @@ goTo('daily_report');
  const accFor=t=>getAllAccountsLight().find(a=>a.sheet===t.sheet||a.sheet===t.customer_sheet)||null;
  const party=t=>{const a=accFor(t)||{};return {name:t.customer_name||a.name||'-',address:t.customer_address||a.address||'',phone:t.customer_phone||a.phone||'',email:t.customer_email||a.email||''}};
  function layout(title,t,items){const c=ci(),p=party(t),mode=t.payment_mode==='credit'?'آجل':'نقدي';const due=t.due_date||'-';return `<div class="print-invoice"><div class="inv-head"><div><div class="inv-brand">${esc(c.name)}</div><div>${esc(c.address||'')}</div><div>${esc(c.phone||'')} ${c.email?'| '+esc(c.email):''}</div></div><div class="inv-title">${esc(title)}<small>رقم المستند: ${esc(t.doc_no||'-')}<br>التاريخ: ${esc(t.date||'-')}</small></div></div><div class="inv-grid"><div><b>بيانات العميل</b><br>الاسم: ${esc(p.name)}<br>العنوان: ${esc(p.address||'-')}<br>الهاتف: ${esc(p.phone||'-')}<br>${p.email?'البريد: '+esc(p.email):''}</div><div><b>بيانات السداد</b><br>الطريقة: ${mode}<br>مدة الائتمان: ${t.credit_days||0} يوم<br>تاريخ الاستحقاق: ${esc(due)}<br>رقم العميل: ${esc(accFor(t)?.code||'-')}</div></div><table class="inv-items"><thead><tr><th>#</th><th>بيان الصنف / الأعمال</th><th>وحدة القياس</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead><tbody>${(items||[]).map((it,i)=>`<tr><td>${String(i+1).padStart(2,'0')}</td><td>${esc(it.desc||it.name||'-')}</td><td>${esc(it.unit||'-')}</td><td>${it.qty||it.count||1}</td><td>${fmtEGP(it.unit_price||it.price||0)}</td><td>${fmtEGP(it.total||it.price||0)}</td></tr>`).join('')}</tbody></table><div class="inv-total"><span>الإجمالي قبل الضريبة</span><b>${fmtEGP(t.subtotal||t.amount||t.total||0)}</b><span>ضريبة القيمة المضافة</span><b>${fmtEGP(t.vat||0)}</b><strong>الإجمالي النهائي</strong><strong>${fmtEGP(t.amount||t.total_with_vat||t.total||0)}</strong></div><div class="inv-bottom"><div><b>الشروط والملاحظات</b><br>${esc(t.credit_note||t.note||'الأسعار والتوريد حسب الاتفاق مع العميل.')}</div><div><b>بيانات البنك</b><br>${esc(c.bank_name||'')}<br>${esc(c.bank_account||'')}</div></div><div class="inv-footer">مصنع العاشر للصناعات الحديدية والخشبية — مستند تجاري</div></div>`}
- window.printStyled=printStyled; function printStyled(title,html){printReport(title,`<style>.print-invoice{font-family:Arial,Tahoma,sans-serif;color:#202d36;font-size:12px}.inv-head{display:flex;justify-content:space-between;border-bottom:3px solid #173d4b;padding:12px 0;margin-bottom:12px}.inv-brand{font-size:20px;font-weight:800;color:#173d4b}.inv-title{text-align:right;font-size:24px;font-weight:800;color:#173d4b}.inv-title small{display:block;font-size:11px;font-weight:400;margin-top:6px;color:#555}.inv-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;background:#f1f4f5;padding:10px;margin-bottom:12px;line-height:1.8}.inv-items{width:100%;border-collapse:collapse;margin-top:10px}.inv-items th{background:#dfe4e7;color:#173d4b}.inv-items td,.inv-items th{border:1px solid #b8c1c5;padding:7px;text-align:center}.inv-items td:nth-child(2){text-align:right}.inv-total{margin:12px 0 12px auto;width:42%;display:grid;grid-template-columns:1fr 1fr;border-top:2px solid #173d4b}.inv-total span,.inv-total b,.inv-total strong{padding:7px;border-bottom:1px solid #c7ced1}.inv-total strong{color:#173d4b;font-size:14px}.inv-bottom{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid #999;padding-top:12px;line-height:1.8}.inv-footer{text-align:center;margin-top:24px;color:#65747c;font-size:10px}</style>${html}`)}
+ window.buildProfessionalInvoice = layout; /* expose so later PDF-export patches (v35/v36) can use the same letterhead template instead of silently no-oping */
+ window.printStyled=printStyled; function printStyled(title,html){printReport(title,`<style>@page{size:A4;margin:10mm}.print-invoice{font-family:Arial,Tahoma,sans-serif;color:#202d36;font-size:12px}.inv-head{display:flex;justify-content:space-between;border-bottom:3px solid #173d4b;padding:12px 0;margin-bottom:12px}.inv-brand{font-size:20px;font-weight:800;color:#173d4b}.inv-title{text-align:right;font-size:24px;font-weight:800;color:#173d4b}.inv-title small{display:block;font-size:11px;font-weight:400;margin-top:6px;color:#555}.inv-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;background:#f1f4f5;padding:10px;margin-bottom:12px;line-height:1.8}.inv-items{width:100%;border-collapse:collapse;margin-top:10px}.inv-items th{background:#dfe4e7;color:#173d4b}.inv-items td,.inv-items th{border:1px solid #b8c1c5;padding:7px;text-align:center}.inv-items td:nth-child(2){text-align:right}.inv-total{margin:12px 0 12px auto;width:42%;display:grid;grid-template-columns:1fr 1fr;border-top:2px solid #173d4b}.inv-total span,.inv-total b,.inv-total strong{padding:7px;border-bottom:1px solid #c7ced1}.inv-total strong{color:#173d4b;font-size:14px}.inv-bottom{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid #999;padding-top:12px;line-height:1.8}.inv-footer{text-align:center;margin-top:24px;color:#65747c;font-size:10px}</style>${html}`)}
  window.viewSaleInvoice=function(id){const t=(STORE.custom_txns||[]).find(x=>x.id===id);if(!t)return;const html=layout('فاتورة بيع',t,t.items||[]);document.getElementById('statement-content').innerHTML=`<button class="close" onclick="closeStatement()">×</button><div class="toolbar" style="margin-bottom:10px"><button class="btn" onclick="printStyled('فاتورة بيع '+${JSON.stringify(t.doc_no||'')},${JSON.stringify(html)})">🖨️ طباعة الفاتورة / PDF</button></div>${html}`;document.getElementById('statement-modal').classList.add('show')};
  window.printMaintenanceEstimate=function(id){const m=(STORE.maintenance_estimates||[]).find(x=>x.id===id);if(!m)return;const t={...m,amount:m.total_with_vat||m.total,subtotal:m.subtotal||m.total,vat:m.vat||0,doc_no:m.doc_no,customer_name:m.customer_name,date:m.date,customer_sheet:m.customer_sheet,customer_address:m.customer_address,customer_phone:m.customer_phone,note:m.note};printStyled('مقايسة صيانة '+(m.doc_no||''),layout('مقايسة صيانة',t,m.items||m.units||[]))};
  const oldRender=window.renderSalesInvoiceSub;window.renderSalesInvoiceSub=function(el){oldRender(el);const results=document.getElementById('arc-results'),toolbar=document.getElementById('arc-results')?.previousElementSibling;if(document.getElementById('arc-from')){document.getElementById('arc-from').closest('.toolbar').style.display='none';document.getElementById('arc-results').style.display='block'}if(results){const d=new Date();d.setDate(1);d.setMonth(d.getMonth()-1);const from=d.toISOString().slice(0,7)+'-01';const toDate=new Date(d.getFullYear(),d.getMonth()+1,0);const to=toDate.toISOString().slice(0,10);const old=window.runArchiveInvoices;const run=()=>{const ar=TXNS.filter(t=>['pallets','boxes','m3','new_channel','hydraulic_sales','hydraulic_maint'].includes(t.category)&&t.date>=from&&t.date<=to);const cu=(STORE.custom_txns||[]).filter(t=>(t.category==='فاتورة بيع'||t.category==='فاتورة صيانة')&&t.date>=from&&t.date<=to);const total=ar.reduce((s,x)=>s+Number(x.value||0),0)+cu.reduce((s,x)=>s+Number(x.amount||0),0);const types={};ar.forEach(x=>types[x.category]=(types[x.category]||0)+1);cu.forEach(x=>types[x.category]=(types[x.category]||0)+1);results.innerHTML=`<div class="kpi-row"><div class="kpi"><div class="lbl">عدد فواتير آخر شهر</div><div class="val">${ar.length+cu.length}</div></div><div class="kpi"><div class="lbl">إجمالي آخر شهر</div><div class="val">${fmtEGP(total)}</div></div><div class="kpi"><div class="lbl">متوسط الفاتورة</div><div class="val">${fmtEGP((ar.length+cu.length)?total/(ar.length+cu.length):0)}</div></div></div><div class="card"><h3>تحليل الفواتير — ${from} إلى ${to}</h3><div class="scroll-table"><table><thead><tr><th>النوع</th><th>عدد الفواتير</th></tr></thead><tbody>${Object.entries(types).map(([k,v])=>`<tr><td>${esc(k)}</td><td>${v}</td></tr>`).join('')||'<tr><td colspan="2">لا توجد فواتير في آخر شهر</td></tr>'}</tbody></table></div></div>`};window.runArchiveInvoices=run;run()}}
@@ -14359,6 +14360,24 @@ goTo('daily_report');
  document.addEventListener('focusin',e=>{if(ids.some(x=>x[0]===e.target.id)){const list=document.getElementById(ids.find(x=>x[0]===e.target.id)[1]);prepare(e.target,list)}},true);
  document.addEventListener('input',e=>{const pair=ids.find(x=>x[0]===e.target.id);if(pair){const list=document.getElementById(pair[1]);update(e.target,list)}},true);
  setTimeout(bind,0);setTimeout(bind,150);setTimeout(bind,500);
+})();
+</script>
+<script>
+/* v38: fix stale render references - PAGES/SECTIONS captured the original render
+   functions before v12-v37 patches wrapped window.<fnName>. Those patches (professional
+   invoice/estimate template, customer info autofill, last-month DSR default, etc.) were
+   silently dead because the router still called the old unwrapped function. Re-sync every
+   entry to whatever window[fn.name] currently points to, now that all patches have loaded. */
+(function resyncPatchedRenders(){
+  function resync(entry){
+    if(!entry) return;
+    if(typeof entry.render==='function' && entry.render.name && window[entry.render.name] && window[entry.render.name]!==entry.render){
+      entry.render = window[entry.render.name];
+    }
+    if(Array.isArray(entry.subs)) entry.subs.forEach(resync);
+  }
+  if(typeof PAGES!=='undefined') Object.values(PAGES).forEach(resync);
+  if(typeof SECTIONS!=='undefined') Object.values(SECTIONS).forEach(resync);
 })();
 </script>
 </body>
