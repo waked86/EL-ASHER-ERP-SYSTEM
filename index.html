@@ -16,21 +16,21 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <style>
   :root{
-    --navy:#0B3D45;
-    --navy-2:#12525C;
-    --navy-3:#1A6B78;
-    --gold:#2E8B9E;
-    --gold-2:#6FC3D6;
-    --wood:#3C7A87;
-    --paper:#F4FAFB;
+    --navy:#0B1E3D;
+    --navy-2:#14315F;
+    --navy-3:#274B8A;
+    --gold:#C9A227;
+    --gold-2:#E8CD6B;
+    --wood:#7A2E33;
+    --paper:#FAF7EF;
     --card:#FFFFFF;
-    --ink:#1E2430;
-    --slate:#6B7280;
-    --line:#E7E1D3;
-    --success:#2F8F5B;
-    --success-bg:#e7f5ec;
-    --danger:#C1443D;
-    --danger-bg:#fbebe9;
+    --ink:#1B1B1F;
+    --slate:#6B6558;
+    --line:#E6DCC2;
+    --success:#2F7A4F;
+    --success-bg:#e9f3ec;
+    --danger:#9C2B33;
+    --danger-bg:#f8ebe9;
     --radius:14px;
   }
   *{box-sizing:border-box;}
@@ -250,8 +250,8 @@
     </div>
   </div>
   <nav id="nav">
-    <button data-tab="daily_report" class="active"><span class="ic">📅</span> تحليل اليوم</button>
-    <button data-tab="overview"><span class="ic">◧</span> نظرة عامة</button>
+    <button data-tab="overview" class="active"><span class="ic">◧</span> نظرة عامة</button>
+    <button data-tab="daily_report"><span class="ic">📅</span> تحليل اليوم</button>
     <button data-tab="sales"><span class="ic">🧾</span> المبيعات</button>
     <button data-tab="customers"><span class="ic">👤</span> العملاء</button>
     <button data-tab="purchases"><span class="ic">🛒</span> المشتريات</button>
@@ -310,7 +310,7 @@ const CUST_URGENT = JSON.parse(document.getElementById('data-urgent').textConten
 const CRM_CUSTOMERS = JSON.parse(document.getElementById('data-crm-customers').textContent);
 const CRM_LISTS = JSON.parse(document.getElementById('data-crm-lists').textContent);
 const MONTH_NAMES = {1:"يناير",2:"فبراير",3:"مارس",4:"إبريل",5:"مايو",6:"يونيه",7:"يوليو",8:"أغسطس",9:"سبتمبر",10:"أكتوبر",11:"نوفمبر",12:"ديسمبر"};
-const GOLD = "#D9A441", NAVY="#12233F", WOOD="#8B5A2B", SUCCESS="#2F8F5B", DANGER="#C1443D", SLATE="#6B7280";
+const GOLD = "#C9A227", NAVY="#0B1E3D", WOOD="#7A2E33", SUCCESS="#2F7A4F", DANGER="#9C2B33", SLATE="#6B6558";
 let charts = {};
 
 function fmt(n, d=0){
@@ -3102,6 +3102,7 @@ const DOC_PREFIX = {
   'prodorder': 'PRO',
   'stockin': 'GRN',
   'stockout': 'GIS',
+  'personal_loan': 'LOAN',
 };
 function nextDocNumber(key){
   STORE.counters[key] = (STORE.counters[key]||0) + 1;
@@ -5673,6 +5674,39 @@ function addAdvance({emp_id, date, amount, note}){
 }
 function deleteAdvance(id){ STORE.advances = STORE.advances.filter(a=>a.id!==id); saveStore(); }
 
+/* ---- قروض شخصية للموظفين (مستقلة عن السلف) - بتتقسط شهريًا حتى تمام السداد ---- */
+if(!STORE.personal_loans) STORE.personal_loans = [];
+function submitPersonalLoan(){
+  const emp_id = document.getElementById('loan-emp').value;
+  const date = document.getElementById('loan-date').value;
+  const principal = Number(document.getElementById('loan-principal').value);
+  const monthly_installment = Number(document.getElementById('loan-installment').value);
+  const note = document.getElementById('loan-note').value.trim();
+  if(!emp_id || !principal || principal<=0){ alert('اختر الموظف واكتب مبلغ القرض'); return; }
+  if(!monthly_installment || monthly_installment<=0){ alert('اكتب قيمة القسط الشهري'); return; }
+  if(!STORE.personal_loans) STORE.personal_loans = [];
+  const doc_no = nextDocNumber('personal_loan');
+  STORE.personal_loans.push({ id: uid('loan'), doc_no, emp_id, date, principal, monthly_installment, note, payments: [] });
+  saveStore();
+  goTo('hr');
+}
+function payLoanInstallment(loanId){
+  const loan = (STORE.personal_loans||[]).find(l=>l.id===loanId);
+  if(!loan) return;
+  const paidSoFar = (loan.payments||[]).reduce((s,p)=>s+p.amount,0);
+  const remaining = Math.max(0, loan.principal - paidSoFar);
+  const suggested = Math.min(loan.monthly_installment, remaining);
+  const input = prompt('قيمة القسط المسدد لهذا الشهر:', suggested);
+  if(input===null) return;
+  const amount = Number(input);
+  if(!amount || amount<=0){ alert('قيمة غير صحيحة'); return; }
+  loan.payments = loan.payments||[];
+  loan.payments.push({ date: todayISO(), amount: Math.min(amount, remaining) });
+  saveStore();
+  goTo('hr');
+}
+function deletePersonalLoan(id){ STORE.personal_loans = (STORE.personal_loans||[]).filter(l=>l.id!==id); saveStore(); }
+
 function renderHRAdvancesSub(el){
   const emps = STORE.employees;
   const empName = id => { const e = emps.find(x=>x.id===id); return e?e.name:'-'; };
@@ -7644,6 +7678,24 @@ function renderHRAdvancesSub(el){
     </div>
 
     <div class="card" style="margin-top:16px">
+      <h3>تسجيل قرض شخصي لموظف</h3>
+      ${emps.length===0 ? '<div class="empty-note">أضف موظفاً أولاً من تبويب "الموظفون".</div>' : `
+      <div class="toolbar" style="flex-wrap:wrap">
+        <select class="field" id="loan-emp" style="flex:1;min-width:180px">${emps.filter(e=>e.active).map(e=>`<option value="${e.id}">${e.name} (${e.code||'-'})</option>`).join('')}</select>
+        <input class="field" type="date" id="loan-date" value="${today}" style="width:150px">
+        <input class="field" type="number" id="loan-principal" placeholder="إجمالي مبلغ القرض" style="width:160px">
+        <input class="field" type="number" id="loan-installment" placeholder="القسط الشهري" style="width:140px">
+        <input class="field" id="loan-note" placeholder="سبب القرض (اختياري)" style="flex:1;min-width:150px">
+        <button class="btn" onclick="submitPersonalLoan()">+ تسجيل القرض</button>
+      </div>
+      <div class="small-note" style="margin-top:8px">القرض يُخصم بالتقسيط الشهري، وكل قرض يفضل شغال حتى تمام السداد - الرصيد المتبقي بيتحدث تلقائي بعد كل قسط.</div>`}
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3>سجل القروض الشخصية <span class="tag">${(STORE.personal_loans||[]).length}</span></h3>
+      <div class="scroll-table" style="max-height:340px"><table><thead><tr><th>رقم القرض</th><th>الموظف</th><th>تاريخ القرض</th><th>إجمالي القرض</th><th>القسط الشهري</th><th>المسدد</th><th>المتبقي</th><th></th></tr></thead><tbody id="loan-log-body"></tbody></table></div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
       <h3>كشف مرتب موظف وصرف الراتب (بالفترة)</h3>
       <div class="toolbar" style="flex-wrap:wrap">
         <select class="field" id="slip-emp">${emps.map(e=>`<option value="${e.id}">${e.name} (${e.code||'-'})</option>`).join('') || '<option value="">لا يوجد موظفون</option>'}</select>
@@ -7677,6 +7729,20 @@ function renderHRAdvancesSub(el){
       <button class="btn ghost" style="padding:4px 9px;font-size:11px;color:var(--danger)" onclick="deleteAdvance('${a.id}'); goTo('hr')">حذف</button></td></tr>
     `).join('') || '<tr><td colspan="7" class="empty-note">لا توجد سلف مسجلة بعد</td></tr>';
   }
+  function renderLoanLog(){
+    const rows = (STORE.personal_loans||[]).slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+    document.getElementById('loan-log-body').innerHTML = rows.map(l=>{
+      const paid = (l.payments||[]).reduce((s,p)=>s+p.amount,0);
+      const remaining = Math.max(0, l.principal - paid);
+      return `<tr><td class="nums" style="font-weight:700">${l.doc_no}</td><td>${empName(l.emp_id)} (${empCode(l.emp_id)})</td><td class="nums">${l.date}</td>
+      <td class="nums">${fmtEGP(l.principal)}</td><td class="nums">${fmtEGP(l.monthly_installment)}</td>
+      <td class="nums" style="color:var(--success)">${fmtEGP(paid)}</td>
+      <td class="nums" style="font-weight:700;color:${remaining>0?'var(--danger)':'var(--success)'}">${remaining>0?fmtEGP(remaining):'تم السداد \u2713'}</td>
+      <td>${remaining>0?`<button class="btn ghost" style="padding:4px 9px;font-size:11px" onclick="payLoanInstallment('${l.id}')">تسجيل قسط الشهر</button>`:''}
+      <button class="btn ghost" style="padding:4px 9px;font-size:11px;color:var(--danger)" onclick="deletePersonalLoan('${l.id}'); goTo('hr')">حذف</button></td></tr>`;
+    }).join('') || '<tr><td colspan="8" class="empty-note">لا توجد قروض شخصية مسجلة بعد</td></tr>';
+  }
+  renderLoanLog();
   renderLog();
   document.getElementById('adv-log-search').addEventListener('input', renderLog);
 }
@@ -10459,44 +10525,69 @@ function openStatement(sheet){
     const from = document.getElementById('stmt-modal-from').value;
     const to = document.getElementById('stmt-modal-to').value;
     const inRange = d => !d || ((!from||d>=from) && (!to||d<=to));
-    const dF = debits.filter(d=>inRange(d.date));
-    const cF = credits.filter(c=>inRange(c.date));
+
+    // بناء دفتر أستاذ واحد مرتب زمنياً بكل الحركات (مدين ودائن) مع رصيد متحرك
+    const opening = Number((STORE.customer_opening_balances||{})[sheet]) || 0;
+    const beforeFrom = debits.filter(d=>d.date && from && d.date<from).reduce((s,x)=>s+x.amount,0)
+                     - credits.filter(c=>c.date && from && c.date<from).reduce((s,x)=>s+x.amount,0);
+    const openingForRange = opening + beforeFrom;
+
+    const all = debits.map(d=>Object.assign({side:'debit'},d)).concat(credits.map(c=>Object.assign({side:'credit'},c)));
+    const rows = all.filter(x=>inRange(x.date)).sort((a,b)=>(a.date||'').localeCompare(b.date||'') || (a.side==='debit'?-1:1));
+
+    let running = openingForRange;
+    let totalDebit = 0, totalCredit = 0;
+    const bodyRows = rows.map((r,i)=>{
+      const debit = r.side==='debit' ? r.amount : 0;
+      const credit = r.side==='credit' ? r.amount : 0;
+      totalDebit += debit; totalCredit += credit;
+      running += debit - credit;
+      const kind = r.side==='credit' ? 'تحصيل' : 'فاتورة';
+      return `<tr>
+        <td>${i+1}</td>
+        <td class="nums">${r.doc_no||'-'}</td>
+        <td class="nums">${r.date||'-'}</td>
+        <td>${kind}</td>
+        <td style="font-size:12px">${r.desc||'-'}</td>
+        <td class="nums" style="color:var(--danger)">${debit?fmt(debit):''}</td>
+        <td class="nums" style="color:var(--success)">${credit?fmt(credit):''}</td>
+        <td class="nums" style="font-weight:700">${fmt(running)}</td>
+        <td>${r.id?`<button class="btn ghost" style="padding:3px 8px;font-size:10.5px;color:var(--danger)" onclick="deleteTxn('${r.id}'); openStatement('${sheet.replace(/'/g,"\\'")}')">حذف</button>`:''}</td>
+      </tr>`;
+    }).join('');
+
     document.getElementById('stmt-modal-body').innerHTML = `
-      <div class="stat-cols">
-        <div><h4>حركات مدين - ${dF.length}</h4>
-          <div class="scroll-table" style="max-height:340px"><table><thead><tr><th>رقم المستند</th><th>التاريخ</th><th>المبلغ</th><th>البيان</th><th></th></tr></thead><tbody>
-          ${dF.map(d=>`<tr><td class="nums" style="font-size:11px">${d.doc_no||'-'}</td><td class="nums">${d.date||'-'}</td><td class="nums">${fmtEGP(d.amount)}</td><td style="font-size:12px">${d.desc||'-'}</td><td>${d.id?`<button class="btn ghost" style="padding:3px 9px;font-size:11px;color:var(--danger)" onclick="deleteTxn('${d.id}'); openStatement('${sheet.replace(/'/g,"\\'")}')">حذف</button>`:''}</td></tr>`).join('') || '<tr><td colspan="5" class="empty-note">لا توجد حركات في هذه الفترة</td></tr>'}
-          </tbody></table></div></div>
-        <div><h4>حركات دائن - ${cF.length}</h4>
-          <div class="scroll-table" style="max-height:340px"><table><thead><tr><th>رقم المستند</th><th>التاريخ</th><th>المبلغ</th><th>البيان</th><th></th></tr></thead><tbody>
-          ${cF.map(c=>`<tr><td class="nums" style="font-size:11px">${c.doc_no||'-'}</td><td class="nums">${c.date||'-'}</td><td class="nums">${fmtEGP(c.amount)}</td><td style="font-size:12px">${c.desc||'-'}</td><td>${c.id?`<button class="btn ghost" style="padding:3px 9px;font-size:11px;color:var(--danger)" onclick="deleteTxn('${c.id}'); openStatement('${sheet.replace(/'/g,"\\'")}')">حذف</button>`:''}</td></tr>`).join('') || '<tr><td colspan="5" class="empty-note">لا توجد حركات في هذه الفترة</td></tr>'}
-          </tbody></table></div></div>
+      <div class="scroll-table" style="max-height:460px">
+      <table>
+        <thead><tr><th>م</th><th>رقم البيان</th><th>التاريخ</th><th>نوع البيان</th><th>البيان</th><th>مدين</th><th>دائن</th><th>الرصيد</th><th></th></tr></thead>
+        <tbody>
+          <tr style="background:var(--paper);font-weight:800"><td colspan="7">الرصيد الافتتاحي${from?' (حتى '+from+')':''}</td><td class="nums">${fmt(openingForRange)}</td><td></td></tr>
+          ${bodyRows || '<tr><td colspan="9" class="empty-note">لا توجد حركات في هذه الفترة</td></tr>'}
+          <tr style="background:var(--paper);font-weight:800">
+            <td colspan="5">الإجمالي</td>
+            <td class="nums" style="color:var(--danger)">${fmt(totalDebit)}</td>
+            <td class="nums" style="color:var(--success)">${fmt(totalCredit)}</td>
+            <td class="nums">${fmt(running)}</td><td></td>
+          </tr>
+        </tbody>
+      </table>
       </div>
-      <div class="small-note" style="margin-top:10px">إجمالي مدين في الفترة: <b class="nums">${fmtEGP(dF.reduce((s,x)=>s+x.amount,0))}</b> &nbsp;|&nbsp; إجمالي دائن في الفترة: <b class="nums">${fmtEGP(cF.reduce((s,x)=>s+x.amount,0))}</b></div>
     `;
     document.getElementById('stmt-modal-print').onclick = ()=>{
       const html = `
         <div class="meta">العميل/المورد: ${acc.name} (${acc.code||'-'}) &nbsp;|&nbsp; من ${from||'البداية'} إلى ${to}</div>
-        <div class="kpi-line">
-          <div>الرصيد الحالي<b>${fmtEGP(acc.balance)}</b></div>
-          <div>إجمالي مدين بالفترة<b>${fmtEGP(dF.reduce((s,x)=>s+x.amount,0))}</b></div>
-          <div>إجمالي دائن بالفترة<b>${fmtEGP(cF.reduce((s,x)=>s+x.amount,0))}</b></div>
-        </div>
-        <h3>حركات مدين</h3>
-        <table><thead><tr><th>رقم المستند</th><th>التاريخ</th><th>المبلغ</th><th>البيان</th></tr></thead><tbody>
-        ${dF.map(d=>`<tr><td>${d.doc_no||'-'}</td><td>${d.date||'-'}</td><td class="nums">${fmtEGP(d.amount)}</td><td>${d.desc||'-'}</td></tr>`).join('')}
-        </tbody></table>
-        <h3>حركات دائن</h3>
-        <table><thead><tr><th>رقم المستند</th><th>التاريخ</th><th>المبلغ</th><th>البيان</th></tr></thead><tbody>
-        ${cF.map(c=>`<tr><td>${c.doc_no||'-'}</td><td>${c.date||'-'}</td><td class="nums">${fmtEGP(c.amount)}</td><td>${c.desc||'-'}</td></tr>`).join('')}
+        <table><thead><tr><th>م</th><th>رقم البيان</th><th>التاريخ</th><th>نوع البيان</th><th>البيان</th><th>مدين</th><th>دائن</th><th>الرصيد</th></tr></thead><tbody>
+        <tr style="font-weight:800"><td colspan="7">الرصيد الافتتاحي</td><td>${fmt(openingForRange)}</td></tr>
+        ${rows.map((r,i)=>`<tr><td>${i+1}</td><td>${r.doc_no||'-'}</td><td>${r.date||'-'}</td><td>${r.side==='credit'?'تحصيل':'فاتورة'}</td><td>${r.desc||'-'}</td><td>${r.side==='debit'?fmt(r.amount):''}</td><td>${r.side==='credit'?fmt(r.amount):''}</td></tr>`).join('')}
+        <tr style="font-weight:800"><td colspan="5">الإجمالي</td><td>${fmt(totalDebit)}</td><td>${fmt(totalCredit)}</td><td>${fmt(running)}</td></tr>
         </tbody></table>`;
       printReport('كشف حساب - ' + acc.name, html);
     };
     document.getElementById('stmt-modal-export').onclick = ()=>{
-      const rows = [];
-      dF.forEach(d=>rows.push([d.doc_no||'', d.date||'', 'مدين', fmtEGP(d.amount), d.desc||'']));
-      cF.forEach(c=>rows.push([c.doc_no||'', c.date||'', 'دائن', fmtEGP(c.amount), c.desc||'']));
-      exportCSV('كشف-حساب-'+acc.name+'.csv', ['رقم المستند','التاريخ','النوع','المبلغ','البيان'], rows);
+      const csvRows = [];
+      csvRows.push(['','','الرصيد الافتتاحي','','',fmt(openingForRange)]);
+      rows.forEach((r,i)=>{ csvRows.push([i+1, r.doc_no||'', r.date||'', r.desc||'', r.side==='debit'?fmt(r.amount):'', r.side==='credit'?fmt(r.amount):'']); });
+      exportCSV('كشف-حساب-'+acc.name+'.csv', ['م','رقم البيان','التاريخ','البيان','مدين','دائن'], csvRows);
     };
   }
   renderBody();
@@ -13246,11 +13337,22 @@ function renderSystemSettingsSub(el){
 }
 function promptClearAllData(){
   if(!checkAdminPin()) return;
-  const c = prompt('لا يمكن التراجع! اكتب "مسح" بالظبط للتأكيد:');
+  const c = prompt('لا يمكن التراجع! سيتم أولاً تنزيل نسخة احتياطية كاملة من كل البيانات المُضافة تلقائياً قبل المسح. اكتب "مسح" بالظبط للتأكيد:');
   if(c !== 'مسح'){ alert('تم الإلغاء'); return; }
-  localStorage.removeItem(STORE_KEY);
-  alert('تم المسح - سيُعاد تحميل الصفحة.');
-  location.reload();
+  exportBackup();
+  setTimeout(async ()=>{
+    const empty = { custom_txns:[], custom_accounts:[], expenses:[] };
+    STORE = empty;
+    try{
+      localStorage.setItem(STORE_KEY, JSON.stringify(STORE));
+      const r = await fetch('/api/state', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({state: STORE})});
+      if(!r.ok) throw new Error('فشل التحديث على الخادم');
+      alert('تم مسح كل البيانات المُضافة من النظام (على كل الأجهزة) - سيُعاد تحميل الصفحة الآن. النسخة الاحتياطية اتنزلت على جهازك لو احتجتها.');
+    }catch(e){
+      alert('تم المسح محلياً، لكن حصل خطأ أثناء تحديث الخادم المركزي: ' + e.message + ' - جرب تاني أو قولي.');
+    }
+    location.reload();
+  }, 600); // مهلة بسيطة لضمان اكتمال تنزيل النسخة الاحتياطية قبل المسح
 }
 SECTIONS.sales.subs.splice(2, 0, {key:'equipment_receipt', label:'إذن استلام معدة', render: renderEquipmentReceiptSub});
 SECTIONS.finance.subs.push({key:'settings', label:'إعدادات النظام', render: renderSystemSettingsSub});
@@ -14162,7 +14264,7 @@ function importCustomerMasterData(){
 
 
 updateLiveClock();
-goTo('daily_report');
+goTo('overview');
 </script>
 <script>
 (function(){
