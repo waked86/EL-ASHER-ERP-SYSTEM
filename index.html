@@ -14540,5 +14540,56 @@ goTo('overview');
   if(typeof SECTIONS!=='undefined') Object.values(SECTIONS).forEach(resync);
 })();
 </script>
+<script>
+/* v39: notifications bell - أهم البنود اللي محتاجة انتباه (فواتير آجلة متأخرة + متابعات CRM
+   مفتوحة اللي بتتولد تلقائياً من v27/v34) في مكان واحد بدل ما يتوهوا بين الشاشات */
+(function(){
+  function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+  function getNotifications(){
+    const now = todayISO();
+    const overdue = (STORE.custom_txns||[]).filter(t=>(t.category==='فاتورة بيع'||t.category==='فاتورة صيانة') && t.payment_mode==='credit' && !t.paid && (t.due_date||'')<now)
+      .map(t=>{
+        const a = getAllAccountsLight().find(x=>x.sheet===t.sheet);
+        return {type:'overdue', id:t.id, title:'فاتورة متأخرة السداد - '+(a?.name||t.customer_name||'-'), meta:'المبلغ: '+fmtEGP(t.amount)+' — الاستحقاق: '+(t.due_date||'-'), priority:'عاجلة'};
+      });
+    const followups = (STORE.followups||[]).filter(f=>!f.done)
+      .map(f=>({type:'followup', id:f.id, title:f.title||'متابعة', meta:(f.customer?'العميل: '+f.customer:'') + (f.ref?' — '+f.ref:''), priority:f.priority||'عادية'}));
+    const order = {'عاجلة':0,'مهمة':1,'عادية':2};
+    return overdue.concat(followups).sort((a,b)=>(order[a.priority]??3)-(order[b.priority]??3));
+  }
+  window.renderNotifPanel = function(){
+    const items = getNotifications();
+    const badge = document.getElementById('notif-badge');
+    if(badge){ badge.textContent = items.length>99?'99+':String(items.length); badge.classList.toggle('show', items.length>0); }
+    const panel = document.getElementById('notif-panel');
+    if(!panel) return;
+    panel.innerHTML = '<h4>الإشعارات والمتابعات ('+items.length+')</h4>' + (items.length ? items.map(it=>`
+      <div class="notif-item">
+        <div class="notif-title">${it.type==='overdue'?'💰 ':'📌 '}${esc(it.title)}</div>
+        <div class="notif-meta">${esc(it.meta)}</div>
+        <div class="notif-actions">
+          ${it.type==='followup' ? `<button onclick="completeFollowup('${it.id}'); window.toggleNotifPanel(false);">تمت المتابعة</button>` : ''}
+          <button onclick="window.toggleNotifPanel(false); ${it.type==='overdue' ? "goToSectionSub('finance','receivables_due')" : "goTo('sales')"};">فتح</button>
+        </div>
+      </div>
+    `).join('') : '<div class="notif-empty">مفيش حاجة محتاجة انتباهك دلوقتي 👍</div>');
+  };
+  window.toggleNotifPanel = function(force){
+    const panel = document.getElementById('notif-panel');
+    if(!panel) return;
+    const show = force!==undefined ? force : !panel.classList.contains('show');
+    panel.classList.toggle('show', show);
+    if(show) window.renderNotifPanel();
+  };
+  document.addEventListener('click', e=>{
+    const wrap = document.getElementById('notif-wrap');
+    const bell = document.getElementById('notif-bell');
+    if(bell && bell.contains(e.target)){ e.stopPropagation(); window.toggleNotifPanel(); return; }
+    if(wrap && !wrap.contains(e.target)) window.toggleNotifPanel(false);
+  });
+  setTimeout(window.renderNotifPanel, 800);
+  setInterval(window.renderNotifPanel, 60000);
+})();
+</script>
 </body>
 </html>
