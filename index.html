@@ -3984,19 +3984,19 @@ function submitStockOut(){
 const SECTIONS = {
   overview: {title:"نظرة عامة", sub:"أداء المصنع التجاري والتشغيلي بنظرة واحدة", standalone:true, render: renderOverview},
 
-  sales: {title:"المبيعات", sub:"فاتورة جديدة، تحليل بالفترة، تقرير أصناف، تقرير صيانة", standalone:false, subs:[
+  sales: {title:"المبيعات", sub:"فاتورة جديدة، سند تحصيل، تحليل بالفترة، تقرير أصناف، تقرير صيانة", standalone:false, subs:[
     {key:'invoice', label:'فاتورة جديدة', render: renderSalesInvoiceSub},
+    {key:'collection', label:'سند تحصيل', render: renderCustCollectionSub},
     {key:'analysis', label:'تحليل العملاء (بالفترة)', render: renderSalesAnalysisSub},
     {key:'items', label:'تقرير أصناف', render: renderSalesItemsSub},
     {key:'maintenance', label:'تقرير صيانة', render: renderSalesMaintenanceSub},
   ]},
 
-  customers: {title:"العملاء", sub:"تصنيف، كشف حساب، مسحوبات بالأصناف، أعمار ديون، تحصيل", standalone:false, subs:[
+  customers: {title:"العملاء", sub:"تصنيف، كشف حساب، مسحوبات بالأصناف، أعمار ديون", standalone:false, subs:[
     {key:'industry', label:'العملاء بتصنيفهم', render: renderCustIndustrySub},
     {key:'statement', label:'كشف حساب', render: renderCustStatementSub},
     {key:'drawdown', label:'مسحوبات العميل بالأصناف', render: renderCustItemDrawdownSub},
     {key:'aging', label:'أعمار الديون', render: renderAging},
-    {key:'collection', label:'تسجيل تحصيل', render: renderCustCollectionSub},
   ]},
 
   purchases: {title:"المشتريات", sub:"فاتورة مشتريات، أوامر الشراء، الموردين", standalone:false, subs:[
@@ -5161,12 +5161,11 @@ SECTIONS.sales = {title:"المبيعات", sub:"فاتورة جديدة، مق�
   {key:'maintenance', label:'تقرير صيانة', render: renderSalesMaintenanceSub},
 ]};
 
-SECTIONS.customers = {title:"العملاء", sub:"تصنيف، كشف حساب، مسحوبات بالأصناف، أعمار ديون، تحصيل", standalone:false, subs:[
+SECTIONS.customers = {title:"العملاء", sub:"تصنيف، كشف حساب، مسحوبات بالأصناف، أعمار ديون", standalone:false, subs:[
   {key:'industry', label:'العملاء بتصنيفهم', render: renderCustIndustrySub},
   {key:'statement', label:'كشف حساب', render: renderCustStatementSub},
   {key:'drawdown', label:'مسحوبات العميل بالأصناف', render: renderCustItemDrawdownSub},
   {key:'aging', label:'أعمار الديون', render: renderAging},
-  {key:'collection', label:'تسجيل تحصيل', render: renderCustCollectionSub},
 ]};
 
 SECTIONS.hr = {title:"الحضور والانصراف", sub:"الموظفون، تسجيل الحضور والانصراف، تقرير الأداء لكل موظف", standalone:false, subs:[
@@ -6988,8 +6987,9 @@ function submitSalaryPayment(emp_id, from, to, base, advancesTotal, overtimeTota
 
 /* ===== v10/sections_final_v10.js ===== */
 /* ============ SECTIONS FINAL RECONFIG (v10) - re-register all sections with latest overridden functions ============ */
-SECTIONS.sales = {title:"المبيعات", sub:"فاتورة جديدة، مقايسة صيانة، تحليل بالفترة، تقرير أصناف، تقرير صيانة، الأهداف والتحقيق", standalone:false, subs:[
+SECTIONS.sales = {title:"المبيعات", sub:"فاتورة جديدة، سند تحصيل، مقايسة صيانة، تحليل بالفترة، تقرير أصناف، تقرير صيانة، الأهداف والتحقيق", standalone:false, subs:[
   {key:'invoice', label:'فاتورة جديدة', render: renderSalesInvoiceSub},
+  {key:'collection', label:'سند تحصيل', render: renderCustCollectionSub},
   {key:'maintenance_estimate', label:'مقايسة صيانة', render: renderMaintenanceEstimateSub},
   {key:'analysis', label:'تحليل العملاء (بالفترة)', render: renderSalesAnalysisSub},
   {key:'items', label:'تقرير أصناف', render: renderSalesItemsSub},
@@ -14010,7 +14010,7 @@ function importEmployeesFromWorkbook(){
 /* Order: sell-side documents (invoice -> quote -> supply orders -> equipment intake -> */
 /* maintenance quote -> maintenance report) first, analytical reports after. */
 (function reorderSalesSubs(){
-  const order = ['invoice','quote','supply_orders','equipment_receipt','maintenance_estimate','maintenance',
+  const order = ['invoice','collection','quote','supply_orders','equipment_receipt','maintenance_estimate','maintenance',
                  'analysis','items','targets','performance','kpis','pipeline','pricing','monthly_breakdown'];
   const bySubKey = {};
   SECTIONS.sales.subs.forEach(s=>{ bySubKey[s.key] = s; });
