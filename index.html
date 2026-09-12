@@ -1987,7 +1987,7 @@ function renderInventory(el){
         <div class="toolbar" style="flex-wrap:wrap">
           <input class="field" id="inv-name" placeholder="اسم الصنف" style="flex:1;min-width:130px">
           <select class="field" id="inv-type" style="width:130px"><option value="raw">خامة</option><option value="finished">منتج تام</option></select>
-          <input class="field" id="inv-unit" placeholder="الوحدة (كجم/باليتة)" style="width:140px">
+          <input class="field" id="inv-unit" placeholder="الوحدة (كجم/باليتة/م³)" style="width:140px">
           <input class="field" type="number" id="inv-reorder" placeholder="حد إعادة الطلب" style="width:130px">
           <button class="btn" onclick="submitInventoryItem()">+ إضافة صنف</button>
         </div>
@@ -3974,7 +3974,7 @@ function renderInvItemsSub(el){
       <div class="toolbar" style="flex-wrap:wrap">
         <input class="field" id="inv-name" placeholder="اسم الصنف" style="flex:1;min-width:130px">
         <select class="field" id="inv-type" style="width:130px"><option value="raw">خامة</option><option value="finished">منتج تام</option></select>
-        <input class="field" id="inv-unit" placeholder="الوحدة (كجم/باليتة)" style="width:140px">
+        <input class="field" id="inv-unit" placeholder="الوحدة (كجم/باليتة/م³)" style="width:140px">
         <input class="field" type="number" id="inv-reorder" placeholder="حد إعادة الطلب" style="width:130px">
         <button class="btn" onclick="submitInventoryItem()">+ إضافة صنف</button>
       </div>
@@ -8015,7 +8015,7 @@ function renderInvItemsSub(el){
       <div class="toolbar" style="flex-wrap:wrap">
         <input class="field" id="inv-name" placeholder="اسم الصنف" style="flex:1;min-width:130px">
         <select class="field" id="inv-type" style="width:130px"><option value="raw">خامة</option><option value="finished">منتج تام</option></select>
-        <input class="field" id="inv-unit" placeholder="الوحدة (كجم/باليتة)" style="width:140px">
+        <input class="field" id="inv-unit" placeholder="الوحدة (كجم/باليتة/م³)" style="width:140px">
         <input class="field" type="number" id="inv-reorder" placeholder="حد إعادة الطلب" style="width:130px">
         <button class="btn" onclick="submitInventoryItem()">+ إضافة صنف</button>
       </div>
@@ -9034,7 +9034,7 @@ function renderInvItemsSub(el){
       <div class="toolbar" style="flex-wrap:wrap">
         <input class="field" id="inv-name" placeholder="اسم الصنف" style="flex:1;min-width:130px">
         <select class="field" id="inv-type" style="width:130px"><option value="raw">خامة</option><option value="finished">منتج تام</option></select>
-        <input class="field" id="inv-unit" placeholder="الوحدة (كجم/باليتة)" style="width:140px">
+        <input class="field" id="inv-unit" placeholder="الوحدة (كجم/باليتة/م³)" style="width:140px">
         <input class="field" type="number" id="inv-reorder" placeholder="حد إعادة الطلب" style="width:130px">
         <input class="field" id="inv-shelf" placeholder="رقم الرف (مثال: A-12)" style="width:140px">
         <button class="btn" onclick="submitInventoryItem()">+ إضافة صنف</button>
@@ -10252,6 +10252,17 @@ function renderBOMSub(el){
         <input class="field" type="number" id="bom-mat-qty" placeholder="الكمية لكل وحدة منتج" style="width:200px">
         <button class="btn ghost" onclick="addDraftBOMMaterial()">+ إضافة خامة</button>
       </div>
+      <div class="card" style="margin-top:10px;background:var(--paper)">
+        <div class="small-note" style="margin-bottom:8px;font-weight:700">🪵 خامة خشب؟ احسب الكمية بالمتر المكعب من مقاس اللوح بدل ما تحسبها يدوي</div>
+        <div class="toolbar" style="flex-wrap:wrap">
+          <input class="field" type="number" id="bom-board-length" placeholder="طول اللوح (سم)" style="width:150px">
+          <input class="field" type="number" id="bom-board-width" placeholder="عرض اللوح (سم)" style="width:150px">
+          <input class="field" type="number" id="bom-board-thickness" placeholder="سمك اللوح (سم)" style="width:150px">
+          <input class="field" type="number" id="bom-board-count" placeholder="عدد الألواح في الوحدة" style="width:170px">
+          <button class="btn ghost" onclick="calcBoardVolume()">احسب الكمية (م³)</button>
+        </div>
+        <div class="small-note" style="margin-top:6px">هيحط الناتج تلقائي في خانة "الكمية لكل وحدة منتج" فوق - يبقى لازم سعر الخامة في "أصناف المخزون" يكون مسجل كـ جنيه/م³ عشان التكلفة تطلع صح.</div>
+      </div>
       <div id="bom-mat-list" style="margin:10px 0"></div>
       <button class="btn" onclick="submitBOM()">حفظ قائمة المواد</button>
     </div>
@@ -10274,6 +10285,17 @@ function renderDraftBOMMaterials(){
     const item = rawItems.find(x=>x.id===m.item_id);
     return `<span class="pill slate" style="margin:2px 4px 2px 0">${item?item.name:'-'} × ${fmt(m.qty)} <a href="javascript:void(0)" onclick="removeDraftBOMMaterial(${i})" style="color:var(--danger);margin-right:6px">✕</a></span>`;
   }).join('') : `<span class="small-note">لم تُضف خامات بعد</span>`;
+}
+function calcBoardVolume(){
+  const L = Number(document.getElementById('bom-board-length').value);
+  const W = Number(document.getElementById('bom-board-width').value);
+  const T = Number(document.getElementById('bom-board-thickness').value);
+  const count = Number(document.getElementById('bom-board-count').value);
+  if(!L || !W || !T || !count){ alert('املأ الطول والعرض والسمك وعدد الألواح كلهم'); return; }
+  // تحويل من سم لمتر، وضرب الأبعاد الثلاثة × العدد = الحجم بالمتر المكعب
+  const volumeM3 = (L/100) * (W/100) * (T/100) * count;
+  document.getElementById('bom-mat-qty').value = volumeM3.toFixed(4);
+  alert('حجم الخشب المطلوب = ' + volumeM3.toFixed(4) + ' م³ (اتحطت في خانة الكمية تلقائي)');
 }
 function addDraftBOMMaterial(){
   const item_id = document.getElementById('bom-mat-item').value;
