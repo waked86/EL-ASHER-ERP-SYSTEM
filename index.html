@@ -1082,13 +1082,32 @@ function renderDailyReportBody(el, dateSel){
     <div class="section-title">ملخص شامل ليوم واحد - كل الحركات في مكان واحد</div>
     <div class="toolbar">
       <input class="field" type="date" id="daily-date" value="${x.d}">
+      <button class="btn ghost" onclick="runAiDailySummary()">✨ تحليل ذكي (AI)</button>
       <button class="btn" style="margin-right:auto" onclick="printDailyReport('${x.d}')">🖨 طباعة / تصدير PDF</button>
     </div>
+    <div id="ai-daily-summary"></div>
     <div id="daily-print-area">${dailyReportContentHtml(x)}</div>
   `;
   document.getElementById('daily-date').addEventListener('change', e=>{
     renderDailyReportBody(el, e.target.value);
   });
+}
+async function runAiDailySummary(){
+  const x = getDailyReportData(document.getElementById('daily-date').value);
+  const box = document.getElementById('ai-daily-summary');
+  box.innerHTML = '<div class="card" style="margin-bottom:16px"><div class="small-note">⏳ جاري التحليل...</div></div>';
+  const prompt = `أنت محلل أعمال لمصنع صناعات حديدية وخشبية في مصر. اكتب فقرة عربية قصيرة (3-4 جمل بحد أقصى) تلخص أداء يوم ${x.d} بأسلوب مباشر وعملي، وتلفت نظر صاحب المصنع لأهم حاجة تستاهل انتباهه (سواء إيجابية أو مقلقة). البيانات:
+- المبيعات: ${x.salesTotal} ج.م، التحصيل: ${x.collToday} ج.م، المشتريات: ${x.purTotal} ج.م، المصروفات: ${x.expTotal} ج.م، السلف: ${x.advTotal} ج.م
+- خامات داخلة: ${x.rawInQty}، بالتات دخلت المخزن: ${x.palletsIn}، بالتات خرجت (بيع): ${x.palletsOut}
+- مقايسات صيانة: ${x.estToday.length} (منها ${x.estResponded} تم الرد عليها)
+- الحضور: ${x.present} حاضر، ${x.absent} غائب
+لا تكرر الأرقام كما هي، فسّرها. اكتب الفقرة مباشرة بدون مقدمات.`;
+  try{
+    const r = await fetch('/api/ai/summarize', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({prompt})});
+    const d = await r.json();
+    if(!r.ok){ box.innerHTML = `<div class="card" style="margin-bottom:16px;border:1px solid var(--danger)"><div class="small-note" style="color:var(--danger)">${d.error||'تعذر التحليل'}</div></div>`; return; }
+    box.innerHTML = `<div class="card" style="margin-bottom:16px;background:linear-gradient(135deg,var(--paper),var(--card))"><h3>✨ تحليل اليوم بالذكاء الاصطناعي</h3><div style="line-height:2">${d.text.replace(/\n/g,'<br>')}</div></div>`;
+  }catch(e){ box.innerHTML = '<div class="card" style="margin-bottom:16px;border:1px solid var(--danger)"><div class="small-note" style="color:var(--danger)">تعذر الاتصال بالخادم</div></div>'; }
 }
 function dailyReportContentHtml(x){
   return `

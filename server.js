@@ -47,5 +47,22 @@ app.get('/api/state',requireAuth,async(_req,res)=>{try{await dbReady();const r=a
 app.put('/api/state',requireAuth,async(req,res)=>{try{await dbReady();const state=req.body.state;if(!state||typeof state!=='object'||Array.isArray(state))return res.status(400).json({error:'بيانات غير صالحة'});await maybeSnapshot(state);await pool.query(`INSERT INTO app_state(id,state,updated_at) VALUES(1,$1,NOW()) ON CONFLICT(id) DO UPDATE SET state=EXCLUDED.state,updated_at=NOW()`,[JSON.stringify(state)]);res.json({ok:true,updatedAt:new Date().toISOString()})}catch(e){res.status(500).json({error:'تعذر حفظ البيانات'})}});
 app.get('/api/state/history',requireAdmin,async(_req,res)=>{try{await dbReady();const r=await pool.query('SELECT id,created_at FROM app_state_history ORDER BY created_at DESC');res.json({backups:r.rows})}catch(e){res.status(500).json({error:'تعذر تحميل النسخ الاحتياطية'})}});
 app.post('/api/state/restore/:id',requireAdmin,async(req,res)=>{try{await dbReady();const r=await pool.query('SELECT state FROM app_state_history WHERE id=$1',[Number(req.params.id)]);if(!r.rows[0])return res.status(404).json({error:'نسخة غير موجودة'});const state=r.rows[0].state;await pool.query(`INSERT INTO app_state_history(state) SELECT state FROM app_state WHERE id=1`);await pool.query(`INSERT INTO app_state(id,state,updated_at) VALUES(1,$1,NOW()) ON CONFLICT(id) DO UPDATE SET state=EXCLUDED.state,updated_at=NOW()`,[JSON.stringify(state)]);res.json({ok:true})}catch(e){res.status(500).json({error:'تعذر استرجاع النسخة'})}});
+app.post('/api/ai/summarize',requireAuth,async(req,res)=>{
+  try{
+    const key = process.env.GEMINI_API_KEY;
+    if(!key) return res.status(503).json({error:'مفتاح الذكاء الاصطناعي غير مضبوط على السيرفر بعد'});
+    const prompt = String(req.body.prompt||'').slice(0,8000);
+    if(!prompt) return res.status(400).json({error:'لا يوجد نص لتحليله'});
+    const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key='+encodeURIComponent(key), {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ contents:[{ parts:[{ text: prompt }] }] })
+    });
+    const d = await r.json();
+    if(!r.ok) return res.status(502).json({error: d?.error?.message || 'تعذر الاتصال بخدمة الذكاء الاصطناعي'});
+    const text = d?.candidates?.[0]?.content?.parts?.map(p=>p.text).join('') || '';
+    if(!text) return res.status(502).json({error:'لم يرجع رد من خدمة الذكاء الاصطناعي'});
+    res.json({text});
+  }catch(e){ res.status(500).json({error:'خطأ غير متوقع: '+e.message}); }
+});
 app.get('*',(_req,res)=>res.sendFile(path.join(__dirname,'index.html')));
 (async()=>{try{if(pool)await dbReady();app.listen(port,()=>console.log(`ERP server listening on ${port}`))}catch(e){console.error(e);process.exit(1)}})();
