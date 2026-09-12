@@ -1805,11 +1805,13 @@ function addProductionOrder({product_name, qty_target, start_date, due_date, not
   });
   saveStore();
 }
-function completeProductionOrder(id, qtyDone){
+function completeProductionOrder(id, qtyDone, laborCost, overheadCost){
   const po = STORE.production_orders.find(p=>p.id===id);
   if(!po) return;
   po.qty_done = Number(qtyDone)||po.qty_target;
   po.status = 'مكتمل';
+  po.labor_cost = Number(laborCost)||0;
+  po.overhead_cost = Number(overheadCost)||0;
   po.raw_materials.forEach(m=>{
     addInventoryMove({item_id:m.item_id, date:todayISO(), direction:'out', qty:m.qty, unit_cost:0, ref:'استهلاك أمر إنتاج #'+po.id.slice(-5), note:po.product_name});
   });
@@ -2148,7 +2150,9 @@ function promptCompleteOrder(id, target){
   if(val===null) return;
   const qty = parseFloat(val);
   if(!qty || qty<=0){ alert('كمية غير صحيحة'); return; }
-  completeProductionOrder(id, qty);
+  const laborVal = prompt('تكلفة العمالة لهذا الأمر (جنيه) - اختياري، سيبها فاضية لو مش عارف:', '0');
+  const overheadVal = prompt('تكلفة تشغيلية إضافية (كهرباء/صيانة معدات...) لهذا الأمر (جنيه) - اختياري:', '0');
+  completeProductionOrder(id, qty, Number(laborVal)||0, Number(overheadVal)||0);
   goTo('production_orders');
 }
 
@@ -12167,8 +12171,26 @@ function runProductionEfficiency(){
 
 function renderProductionCostSub(el){
   const yearAgo = (function(){ const d=new Date(); d.setFullYear(d.getFullYear()-1); return d.toISOString().slice(0,10); })();
+  const boms = STORE.boms||[];
   el.innerHTML = `
+    <div class="section-eyebrow">💰 تكاليف الإنتاج</div>
+    <div class="section-title">تكلفة الخامة + العمالة + التشغيل، وتأثير الهالك على تكلفة الوحدة</div>
     <div class="card">
+      <h3>حاسبة تكلفة نظرية سريعة (قبل ما تنتج فعليًا)</h3>
+      <div class="small-note" style="margin-bottom:10px">بتحسب تكلفة الوحدة "على الورق" من قائمة المواد (BOM) المُعرَّفة للمنتج، مع افتراض نسبة هالك متوقعة.</div>
+      <div class="toolbar" style="flex-wrap:wrap">
+        <select class="field" id="pcost-calc-product" style="flex:1;min-width:200px">
+          <option value="">اختر منتج له قائمة مواد معرّفة</option>
+          ${boms.map((b,i)=>`<option value="${i}">${b.product}</option>`).join('')}
+        </select>
+        <input class="field" type="number" id="pcost-calc-waste" placeholder="نسبة هالك متوقعة % (مثال: 5)" style="width:220px" value="0">
+        <input class="field" type="number" id="pcost-calc-labor" placeholder="تكلفة عمالة للوحدة (جنيه)" style="width:200px" value="0">
+        <input class="field" type="number" id="pcost-calc-overhead" placeholder="تكلفة تشغيلية للوحدة (جنيه)" style="width:200px" value="0">
+        <button class="btn" onclick="runTheoreticalCost()">احسب</button>
+      </div>
+      <div id="pcost-calc-result" style="margin-top:12px"></div>
+    </div>
+    <div class="card" style="margin-top:16px">
       <div class="toolbar" style="flex-wrap:wrap">
         <label class="small-note">من (تاريخ بدء الأمر):</label><input class="field" type="date" id="pcost-from" value="${yearAgo}">
         <label class="small-note">إلى:</label><input class="field" type="date" id="pcost-to" value="${todayISO()}">
@@ -12178,6 +12200,37 @@ function renderProductionCostSub(el){
     <div id="pcost-results"></div>
   `;
   runProductionCost();
+}
+function runTheoreticalCost(){
+  const idx = document.getElementById('pcost-calc-product').value;
+  const box = document.getElementById('pcost-calc-result');
+  if(idx===''){ box.innerHTML = '<div class="small-note" style="color:var(--danger)">اختر منتج أولاً</div>'; return; }
+  const bom = STORE.boms[Number(idx)];
+  const wastePct = Number(document.getElementById('pcost-calc-waste').value)||0;
+  const laborUnit = Number(document.getElementById('pcost-calc-labor').value)||0;
+  const overheadUnit = Number(document.getElementById('pcost-calc-overhead').value)||0;
+  let materialCost = 0;
+  const rows = bom.materials.map(m=>{
+    const item = STORE.inventory_items.find(i=>i.id===m.item_id);
+    const moves = STORE.inventory_moves.filter(mv=>mv.item_id===m.item_id && mv.direction==='in' && mv.unit_cost>0);
+    const avgCost = moves.length ? moves.reduce((s,mv)=>s+mv.unit_cost,0)/moves.length : 0;
+    const qtyWithWaste = m.qty * (1 + wastePct/100);
+    const cost = qtyWithWaste*avgCost;
+    materialCost += cost;
+    return {name:item?item.name:'-', qty:qtyWithWaste, avgCost, cost};
+  });
+  const totalUnitCost = materialCost + laborUnit + overheadUnit;
+  box.innerHTML = `
+    <table><thead><tr><th>الخامة</th><th>الكمية (شاملة الهالك ${wastePct}%)</th><th>متوسط سعر الوحدة</th><th>التكلفة</th></tr></thead><tbody>
+    ${rows.map(r=>`<tr><td>${r.name}</td><td class="nums">${fmt(r.qty,2)}</td><td class="nums">${fmtEGP(r.avgCost)}</td><td class="nums" style="font-weight:700">${fmtEGP(r.cost)}</td></tr>`).join('')}
+    </tbody></table>
+    <div class="kpi-row" style="margin-top:12px">
+      <div class="kpi"><div class="lbl">تكلفة الخامة للوحدة</div><div class="val">${fmtEGP(materialCost)}</div></div>
+      <div class="kpi"><div class="lbl">+ عمالة</div><div class="val">${fmtEGP(laborUnit)}</div></div>
+      <div class="kpi"><div class="lbl">+ تشغيلية</div><div class="val">${fmtEGP(overheadUnit)}</div></div>
+      <div class="kpi"><div class="lbl">التكلفة الكاملة المتوقعة للوحدة</div><div class="val" style="color:var(--wood)">${fmtEGP(totalUnitCost)}</div></div>
+    </div>
+  `;
 }
 function runProductionCost(){
   const from = document.getElementById('pcost-from').value;
@@ -12191,22 +12244,36 @@ function runProductionCost(){
       const avgCost = moves.length ? moves.reduce((s,mv)=>s+mv.unit_cost,0)/moves.length : 0;
       materialCost += m.qty*avgCost;
     });
+    const laborCost = o.labor_cost||0, overheadCost = o.overhead_cost||0;
+    const fullCost = materialCost + laborCost + overheadCost;
+    const target = o.qty_target||o.qty_done||0;
+    const wasteQty = Math.max(0, target - (o.qty_done||0));
+    const wastePct = target ? (wasteQty/target*100) : 0;
     const costPerUnit = o.qty_done ? materialCost/o.qty_done : 0;
-    return {doc_no:o.doc_no, product:o.product_name, qty_done:o.qty_done, material_cost:materialCost, cost_per_unit:costPerUnit};
+    const fullCostPerUnit = o.qty_done ? fullCost/o.qty_done : 0;
+    return {doc_no:o.doc_no, product:o.product_name, qty_target:target, qty_done:o.qty_done, wasteQty, wastePct, material_cost:materialCost, labor_cost:laborCost, overhead_cost:overheadCost, full_cost:fullCost, cost_per_unit:costPerUnit, full_cost_per_unit:fullCostPerUnit};
   });
   const totalMaterialCost = rows.reduce((s,r)=>s+r.material_cost,0);
+  const totalFullCost = rows.reduce((s,r)=>s+r.full_cost,0);
+  const totalWaste = rows.reduce((s,r)=>s+r.wasteQty,0);
+  const avgWastePct = rows.length ? rows.reduce((s,r)=>s+r.wastePct,0)/rows.length : 0;
 
   document.getElementById('pcost-results').innerHTML = `
     <div class="kpi-row" style="margin-top:12px">
       <div class="kpi"><div class="lbl">إجمالي تكلفة الخامات بالفترة</div><div class="val">${fmtEGP(totalMaterialCost)}</div></div>
-      <div class="kpi"><div class="lbl">عدد الأوامر المكتملة المُكلَّفة</div><div class="val">${fmt(rows.length)}</div></div>
+      <div class="kpi"><div class="lbl">إجمالي التكلفة الكاملة (خامة+عمالة+تشغيل)</div><div class="val" style="color:var(--wood)">${fmtEGP(totalFullCost)}</div></div>
+      <div class="kpi"><div class="lbl">إجمالي وحدات هالكة</div><div class="val" style="color:var(--danger)">${fmt(totalWaste)}</div></div>
+      <div class="kpi"><div class="lbl">متوسط نسبة الهالك</div><div class="val" style="color:${avgWastePct>5?'var(--danger)':'var(--success)'}">${fmt(avgWastePct,1)}%</div></div>
     </div>
     <div class="card">
-      <div class="scroll-table" style="max-height:460px"><table><thead><tr><th>رقم الأمر</th><th>المنتج</th><th>الكمية المُنتجة</th><th>تكلفة الخامات</th><th>تكلفة الوحدة</th></tr></thead><tbody>
-      ${rows.map(r=>`<tr><td class="nums">${r.doc_no}</td><td>${r.product}</td><td class="nums">${fmt(r.qty_done)}</td><td class="nums" style="font-weight:700">${fmtEGP(r.material_cost)}</td><td class="nums">${fmtEGP(r.cost_per_unit)}</td></tr>`).join('') || '<tr><td colspan="5" class="empty-note">لا توجد أوامر مكتملة بتكلفة مسجلة في هذه الفترة</td></tr>'}
+      <div class="scroll-table" style="max-height:460px"><table><thead><tr><th>رقم الأمر</th><th>المنتج</th><th>المستهدف</th><th>المُنتج فعليًا</th><th>الهالك</th><th>نسبة الهالك</th><th>تكلفة الخامة</th><th>عمالة</th><th>تشغيلية</th><th>التكلفة الكاملة</th><th>تكلفة الوحدة (خامة فقط)</th><th>تكلفة الوحدة (كاملة)</th></tr></thead><tbody>
+      ${rows.map(r=>`<tr><td class="nums">${r.doc_no}</td><td>${r.product}</td><td class="nums">${fmt(r.qty_target)}</td><td class="nums">${fmt(r.qty_done)}</td>
+      <td class="nums" style="color:var(--danger)">${fmt(r.wasteQty)}</td><td class="nums" style="color:${r.wastePct>5?'var(--danger)':'var(--success)'}">${fmt(r.wastePct,1)}%</td>
+      <td class="nums">${fmtEGP(r.material_cost)}</td><td class="nums">${fmtEGP(r.labor_cost)}</td><td class="nums">${fmtEGP(r.overhead_cost)}</td>
+      <td class="nums" style="font-weight:700">${fmtEGP(r.full_cost)}</td><td class="nums">${fmtEGP(r.cost_per_unit)}</td><td class="nums" style="font-weight:700;color:var(--wood)">${fmtEGP(r.full_cost_per_unit)}</td></tr>`).join('') || '<tr><td colspan="12" class="empty-note">لا توجد أوامر مكتملة بتكلفة مسجلة في هذه الفترة</td></tr>'}
       </tbody></table></div>
     </div>
-    <div class="small-note">التكلفة هنا للخامات فقط (بمتوسط سعر الوحدة من أذون الإضافة المسجل لها سعر).</div>
+    <div class="small-note">"الهالك" = الفرق بين الكمية المستهدفة والمُنتجة فعليًا لكل أمر - وكلما زاد، ارتفعت تكلفة الوحدة تلقائيًا لأن نفس تكلفة الخامة اتقسمت على وحدات أقل. تكلفة العمالة والتشغيلية بتتسجل يدويًا عند إتمام كل أمر إنتاج (اختياري).</div>
   `;
 }
 
