@@ -88,9 +88,15 @@
   #topbar .sub{ color:var(--slate); font-size:12.5px; margin-top:2px;}
   #search-box{
     display:flex; align-items:center; gap:8px; background:var(--paper); border:1px solid var(--line);
-    border-radius:10px; padding:8px 14px; width:290px;
+    border-radius:10px; padding:8px 14px; width:290px; position:relative;
   }
   #search-box input{ all:unset; flex:1; font-family:'Cairo'; font-size:13.5px; }
+  #global-search-results{ display:none; position:absolute; top:46px; right:0; left:0; max-height:360px; overflow-y:auto; background:var(--card); border:1px solid var(--line); border-radius:12px; box-shadow:0 8px 28px rgba(0,0,0,.15); z-index:60; padding:6px; }
+  #global-search-results.show{ display:block; }
+  #global-search-results .gsr-item{ display:flex; justify-content:space-between; gap:8px; padding:8px 10px; border-radius:8px; font-size:12.5px; cursor:pointer; }
+  #global-search-results .gsr-item:hover{ background:var(--paper); }
+  #global-search-results .gsr-tag{ font-size:10.5px; color:var(--slate); background:var(--paper); padding:2px 8px; border-radius:20px; white-space:nowrap; }
+  #global-search-results .gsr-empty{ padding:14px; text-align:center; color:var(--slate); font-size:12px; }
   #notif-bell{ position:relative; background:var(--paper); border:1px solid var(--line); border-radius:10px; width:42px; height:42px; font-size:18px; cursor:pointer; }
   #notif-badge{ position:absolute; top:-4px; left:-4px; background:var(--danger); color:#fff; font-size:10px; font-weight:800; min-width:17px; height:17px; border-radius:50%; display:none; align-items:center; justify-content:center; padding:0 3px; }
   #notif-badge.show{ display:flex; }
@@ -279,7 +285,8 @@
     </div>
     <div id="search-box">
       <span>🔎</span>
-      <input id="global-search" placeholder="ابحث عن عميل أو مورد بالاسم...">
+      <input id="global-search" placeholder="ابحث عن عميل، مورد، موظف، فاتورة، مقايسة...">
+      <div id="global-search-results"></div>
     </div>
     <div id="notif-wrap" style="position:relative">
       <button id="notif-bell" title="الإشعارات والمتابعات">🔔<span id="notif-badge"></span></button>
@@ -363,17 +370,51 @@ function goTo(tab){
   p.render(el);
 }
 
-document.getElementById('global-search').addEventListener('keydown', (e)=>{
-  if(e.key === 'Enter'){
-    const q = e.target.value.trim();
-    if(!q) return;
-    goToSectionSub('customers','statement');
-    setTimeout(()=>{
-      const inp = document.getElementById('stmt-search');
-      if(inp){ inp.value = q; inp.dispatchEvent(new Event('input')); }
-    }, 60);
+(function(){
+  const input = document.getElementById('global-search');
+  const box = document.getElementById('global-search-results');
+  function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+  function runSearch(q){
+    q = q.trim().toLowerCase();
+    if(q.length<2){ box.classList.remove('show'); return; }
+    const results = [];
+    (typeof getAllAccountsLight==='function'?getAllAccountsLight():[]).forEach(a=>{
+      if((a.name||'').toLowerCase().includes(q) || String(a.code||'').toLowerCase().includes(q)){
+        results.push({tag: a.type==='supplier'?'مورد':'عميل', label:a.name+' ('+(a.code||'-')+')', action:()=>{goToSectionSub('customers','statement'); setTimeout(()=>{const inp=document.getElementById('stmt-search'); if(inp){inp.value=a.name; inp.dispatchEvent(new Event('input'));}},60);}});
+      }
+    });
+    (STORE.employees||[]).forEach(e=>{
+      if((e.name||'').toLowerCase().includes(q) || String(e.code||'').toLowerCase().includes(q)){
+        results.push({tag:'موظف', label:e.name+' ('+(e.code||'-')+')', action:()=>goTo('hr')});
+      }
+    });
+    (STORE.custom_txns||[]).forEach(t=>{
+      if((t.category==='فاتورة بيع'||t.category==='فاتورة مشتريات') && ((t.doc_no||'').toLowerCase().includes(q) || (t.desc||'').toLowerCase().includes(q))){
+        results.push({tag: t.category, label:(t.doc_no||'-')+' - '+(t.desc||'-')+' - '+fmtEGP(t.amount), action:()=>goToSectionSub(t.category==='فاتورة بيع'?'sales':'purchases', t.category==='فاتورة بيع'?'invoice':'invoice')});
+      }
+    });
+    (STORE.maintenance_estimates||[]).forEach(m=>{
+      if((m.doc_no||'').toLowerCase().includes(q) || (m.customer_name||'').toLowerCase().includes(q)){
+        results.push({tag:'مقايسة صيانة', label:(m.doc_no||'-')+' - '+(m.customer_name||'-'), action:()=>goToSectionSub('sales','maintenance_estimate')});
+      }
+    });
+    box.innerHTML = results.length ? results.slice(0,15).map((r,i)=>`<div class="gsr-item" data-i="${i}"><span>${esc(r.label)}</span><span class="gsr-tag">${esc(r.tag)}</span></div>`).join('') : '<div class="gsr-empty">لا توجد نتائج مطابقة</div>';
+    box.classList.add('show');
+    box.querySelectorAll('.gsr-item').forEach((el,i)=>el.addEventListener('click', ()=>{ results[i].action(); box.classList.remove('show'); input.value=''; }));
   }
-});
+  input.addEventListener('input', e=>runSearch(e.target.value));
+  input.addEventListener('focus', e=>{ if(e.target.value.trim().length>=2) runSearch(e.target.value); });
+  document.addEventListener('click', e=>{ if(!document.getElementById('search-box').contains(e.target)) box.classList.remove('show'); });
+  input.addEventListener('keydown', (e)=>{
+    if(e.key === 'Enter'){
+      const q = e.target.value.trim();
+      if(!q) return;
+      goToSectionSub('customers','statement');
+      setTimeout(()=>{ const inp = document.getElementById('stmt-search'); if(inp){ inp.value = q; inp.dispatchEvent(new Event('input')); } }, 60);
+      box.classList.remove('show');
+    }
+  });
+})();
 
 /* ===================== PLACEHOLDER RENDER FUNCTIONS ===================== */
 /* ============ OVERVIEW ============ */
@@ -926,7 +967,17 @@ function addTxn({sheetOrName, isNewAccount, type, side, date, amount, desc, cate
   saveStore();
   return sheet;
 }
-function deleteTxn(id){ STORE.custom_txns = STORE.custom_txns.filter(t=>t.id!==id); saveStore(); }
+function logAudit(action, details){
+  if(!STORE.audit_log) STORE.audit_log = [];
+  STORE.audit_log.push({ ts: new Date().toISOString(), user: window.currentUser?.displayName || 'غير معروف', action, details: details||'' });
+  if(STORE.audit_log.length > 500) STORE.audit_log = STORE.audit_log.slice(-500); // نحتفظ بآخر 500 حركة بس
+  saveStore();
+}
+function deleteTxn(id){
+  const t = STORE.custom_txns.find(x=>x.id===id);
+  if(t) logAudit('حذف حركة مالية', (t.category||'-')+' - '+(t.desc||'')+' - '+fmtEGP(t.amount||0));
+  STORE.custom_txns = STORE.custom_txns.filter(t=>t.id!==id); saveStore();
+}
 
 function addExpense({date, category, description, amount}){
   STORE.expenses.push({id:uid('exp'), date:date||todayISO(), category:category||'أخرى', description:description||'', amount:Number(amount)||0, created_at:new Date().toISOString()});
@@ -5675,7 +5726,11 @@ function addAdvance({emp_id, date, amount, note}){
   saveStore();
   return doc_no;
 }
-function deleteAdvance(id){ STORE.advances = STORE.advances.filter(a=>a.id!==id); saveStore(); }
+function deleteAdvance(id){
+  const a = STORE.advances.find(x=>x.id===id);
+  if(a) logAudit('حذف سلفة', empName(a.emp_id)+' - '+fmtEGP(a.amount||0));
+  STORE.advances = STORE.advances.filter(a=>a.id!==id); saveStore();
+}
 
 /* ---- قروض شخصية للموظفين (مستقلة عن السلف) - بتتقسط شهريًا حتى تمام السداد ---- */
 if(!STORE.personal_loans) STORE.personal_loans = [];
@@ -5708,7 +5763,11 @@ function payLoanInstallment(loanId){
   saveStore();
   goTo('hr');
 }
-function deletePersonalLoan(id){ STORE.personal_loans = (STORE.personal_loans||[]).filter(l=>l.id!==id); saveStore(); }
+function deletePersonalLoan(id){
+  const l = (STORE.personal_loans||[]).find(x=>x.id===id);
+  if(l) logAudit('حذف قرض شخصي', empName(l.emp_id)+' - '+fmtEGP(l.principal||0));
+  STORE.personal_loans = (STORE.personal_loans||[]).filter(l=>l.id!==id); saveStore();
+}
 
 function renderHRAdvancesSub(el){
   const emps = STORE.employees;
@@ -13329,6 +13388,18 @@ function renderSystemSettingsSub(el){
   el.innerHTML = `
     <div class="section-eyebrow">⚙️ إعدادات وصيانة النظام</div>
     <div class="card"><h3>تغيير كود الأدمن</h3><button class="btn ghost" onclick="changeAdminPin()">تغيير الكود</button></div>
+    <div class="card" style="margin-top:16px">
+      <h3>النسخ الاحتياطية التلقائية</h3>
+      <div class="small-note" style="margin-bottom:10px">النظام بياخد نسخة كاملة من كل البيانات تلقائيًا أول ما تتعمل أي حركة كل يوم، ومحتفظ بآخر 60 يوم. لو حصل أي خطأ، تقدر ترجع لأي يوم من هنا.</div>
+      <div id="backup-history-list" class="scroll-table" style="max-height:280px">جاري التحميل...</div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3>سجل الحركات الحساسة (Audit Log) <span class="tag">${(STORE.audit_log||[]).length}</span></h3>
+      <div class="small-note" style="margin-bottom:10px">بيسجل تلقائيًا: حذف حركات مالية أو سلف أو قروض، مسح البيانات، استرجاع نسخ احتياطية - مين عملها وإمتى.</div>
+      <div class="scroll-table" style="max-height:300px"><table><thead><tr><th>الوقت</th><th>المستخدم</th><th>الحركة</th><th>التفاصيل</th></tr></thead><tbody>
+      ${(STORE.audit_log||[]).slice().reverse().map(a=>`<tr><td class="nums" style="font-size:11.5px">${new Date(a.ts).toLocaleString('ar-EG')}</td><td>${a.user}</td><td><span class="pill slate">${a.action}</span></td><td style="font-size:12px">${a.details||'-'}</td></tr>`).join('') || '<tr><td colspan="4" class="empty-note">مفيش حركات حساسة متسجلة لسه</td></tr>'}
+      </tbody></table></div>
+    </div>
     <div class="card" style="margin-top:16px; border:2px solid var(--danger)">
       <h3 style="color:var(--danger)">⚠️ مسح كل البيانات المُضافة (منطقة خطر)</h3>
       <div class="small-note" style="margin-bottom:10px; line-height:1.9">
@@ -13338,14 +13409,48 @@ function renderSystemSettingsSub(el){
       <button class="btn ghost" style="color:var(--danger); border-color:var(--danger)" onclick="promptClearAllData()">مسح كل البيانات المُضافة نهائياً</button>
     </div>
   `;
+  loadBackupHistory();
+}
+async function loadBackupHistory(){
+  const box = document.getElementById('backup-history-list');
+  if(!box) return;
+  try{
+    const r = await fetch('/api/state/history');
+    const d = await r.json();
+    if(!r.ok){ box.textContent = d.error||'تعذر التحميل (متاح للمدير فقط)'; return; }
+    if(!d.backups.length){ box.innerHTML = '<div class="empty-note">لسه معملتش أي حركة يتسجل عليها نسخة يومية</div>'; return; }
+    box.innerHTML = `<table><thead><tr><th>تاريخ النسخة</th><th></th></tr></thead><tbody>
+      ${d.backups.map(b=>`<tr><td>${new Date(b.created_at).toLocaleString('ar-EG')}</td><td><button class="btn ghost" style="padding:4px 10px;font-size:11.5px" onclick="restoreBackup(${b.id})">استرجاع هذه النسخة</button></td></tr>`).join('')}
+    </tbody></table>`;
+  }catch(e){ box.textContent = 'تعذر الاتصال بالخادم'; }
+}
+async function restoreBackup(id){
+  if(!checkAdminPin()) return;
+  if(!confirm('هيتم استبدال كل البيانات الحالية بنسخة هذا اليوم. الوضع الحالي هيتحفظ كنسخة احتياطية قبل الاسترجاع لو احتجته تاني. متأكد؟')) return;
+  try{
+    const r = await fetch('/api/state/restore/'+id, {method:'POST'});
+    const d = await r.json();
+    if(!r.ok){ alert(d.error||'فشل الاسترجاع'); return; }
+    // نسجل حركة الاسترجاع في البيانات المستعادة نفسها بعد ما تمت فعلاً، عشان مانكتبش على القديمة ونعمل تعارض توقيت
+    try{
+      const r2 = await fetch('/api/state'); const d2 = await r2.json();
+      const restored = d2.state || {};
+      restored.audit_log = restored.audit_log || [];
+      restored.audit_log.push({ ts: new Date().toISOString(), user: window.currentUser?.displayName || 'غير معروف', action:'استرجاع نسخة احتياطية', details:'رقم النسخة: '+id });
+      await fetch('/api/state', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({state: restored})});
+    }catch(e){ /* التسجيل مش أولوية توقف الاسترجاع نفسه */ }
+    alert('تم الاسترجاع بنجاح - سيتم تحديث الصفحة الآن.');
+    location.reload();
+  }catch(e){ alert('تعذر الاتصال بالخادم'); }
 }
 function promptClearAllData(){
   if(!checkAdminPin()) return;
   const c = prompt('لا يمكن التراجع! سيتم أولاً تنزيل نسخة احتياطية كاملة من كل البيانات المُضافة تلقائياً قبل المسح. اكتب "مسح" بالظبط للتأكيد:');
   if(c !== 'مسح'){ alert('تم الإلغاء'); return; }
+  logAudit('مسح كل البيانات', 'تنفيذ مسح شامل لكل البيانات المضافة في النظام');
   exportBackup();
   setTimeout(async ()=>{
-    const empty = { custom_txns:[], custom_accounts:[], expenses:[] };
+    const empty = { custom_txns:[], custom_accounts:[], expenses:[], audit_log: STORE.audit_log||[] };
     STORE = empty;
     try{
       localStorage.setItem(STORE_KEY, JSON.stringify(STORE));
@@ -14285,7 +14390,7 @@ goTo('overview');
   window.erpCan=can;
   function gateUI(){document.querySelectorAll('#nav button[data-tab]').forEach(b=>{const p=b.dataset.tab+'.view';b.style.display=(b.dataset.public==='1'||can(p))?'':'none'});if(currentUser?.role==='admin'||can('users.manage')){if(!document.querySelector('.admin-nav')){const b=document.createElement('button');b.className='admin-nav';b.textContent='⚙ إدارة المستخدمين والصلاحيات';b.onclick=openUsers;document.getElementById('nav').appendChild(b)}}document.addEventListener('click',guardAction,true)}
   function guardAction(e){const b=e.target.closest('button');if(!b||b.classList.contains('admin-nav'))return;const t=(b.textContent||'').trim();const rules=[[/فاتورة بيع|فاتورة مبيعات/,'sales.invoice.create'],[/إذن استلام معدة/,'purchases.receipt.create'],[/أمر إنتاج|أمر انتاج/,'production.order.create'],[/هدف|الأهداف والتحقيق/,'sales.targets.edit']];const hit=rules.find(x=>x[0].test(t));if(hit&&!can(hit[1])){e.preventDefault();e.stopImmediatePropagation();alert('ليس لديك صلاحية: '+PERMS[hit[1]]);return false}}
-  async function beginSync(user){try{const r=await fetch('/api/state'),d=await r.json();if(!r.ok)throw Error(d.error||'تعذر تحميل البيانات');currentUser=user;const local=STORE;if(d.state&&typeof d.state==='object'&&Object.keys(d.state).length){STORE=Object.assign({custom_txns:[],custom_accounts:[],expenses:[]},d.state);if(!STORE._hr_reset_v1){STORE.employees=[];STORE.attendance=[];STORE.hr_txns=[];STORE.salary_payments=[];STORE.advances=[];STORE._hr_reset_v1=true;await fetch('/api/state',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({state:STORE})})}localStorage.setItem(STORE_KEY,JSON.stringify(STORE))}else if(local&&(local.custom_txns?.length||local.custom_accounts?.length||local.expenses?.length)){await fetch('/api/state',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({state:local})})}auth.remove();document.body.dataset.user=user.username;const title=document.querySelector('#topbar .sub');if(title){const badge=document.createElement('div');badge.className='cloud-user';badge.textContent='متصل: '+user.displayName;title.appendChild(badge)}gateUI();if(typeof goTo==='function'){const active=document.querySelector('#nav button.active');goTo(active?.dataset.tab||'overview')}}catch(e){error.textContent=e.message;setForm(false)}}
+  async function beginSync(user){try{const r=await fetch('/api/state'),d=await r.json();if(!r.ok)throw Error(d.error||'تعذر تحميل البيانات');currentUser=user;window.currentUser=user;const local=STORE;if(d.state&&typeof d.state==='object'&&Object.keys(d.state).length){STORE=Object.assign({custom_txns:[],custom_accounts:[],expenses:[]},d.state);if(!STORE._hr_reset_v1){STORE.employees=[];STORE.attendance=[];STORE.hr_txns=[];STORE.salary_payments=[];STORE.advances=[];STORE._hr_reset_v1=true;await fetch('/api/state',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({state:STORE})})}localStorage.setItem(STORE_KEY,JSON.stringify(STORE))}else if(local&&(local.custom_txns?.length||local.custom_accounts?.length||local.expenses?.length)){await fetch('/api/state',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({state:local})})}auth.remove();document.body.dataset.user=user.username;const title=document.querySelector('#topbar .sub');if(title){const badge=document.createElement('div');badge.className='cloud-user';badge.textContent='متصل: '+user.displayName;title.appendChild(badge)}gateUI();if(typeof goTo==='function'){const active=document.querySelector('#nav button.active');goTo(active?.dataset.tab||'overview')}}catch(e){error.textContent=e.message;setForm(false)}}
   window.saveStore=function(){try{localStorage.setItem(STORE_KEY,JSON.stringify(STORE));clearTimeout(syncTimer);syncTimer=setTimeout(async()=>{try{await fetch('/api/state',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({state:STORE})})}catch(e){console.error('تعذر مزامنة البيانات',e)}},300)}catch(e){console.error('تعذر الحفظ',e)}};
   function openUsers(){if(!can('users.manage'))return;let old=document.getElementById('erp-users');if(old)old.remove();const el=document.createElement('div');el.id='erp-users';el.innerHTML='<div class="box"><button class="close" onclick="document.getElementById(\'erp-users\').remove()">×</button><h2>إدارة المستخدمين والصلاحيات</h2><p class="small-note">أنشئ مستخدمًا وحدد له الوظائف المسموح بها. المدير لديه كل الصلاحيات.</p><div id="users-list">جاري التحميل...</div><hr><h3>إضافة مستخدم جديد</h3><input id="new-display" placeholder="الاسم الظاهر"><input id="new-username" placeholder="اسم المستخدم بالإنجليزية"><div class="pass-wrap">'+passwordField('new-password','كلمة المرور')+'</div><select id="new-role"><option value="staff">موظف بصلاحيات محددة</option><option value="admin">مدير كامل الصلاحيات</option></select><div class="perm-grid">'+Object.entries(PERMS).map(([k,v])=>'<label><input type="checkbox" data-perm="'+k+'"> '+v+'</label>').join('')+'</div><br><button id="create-user">حفظ المستخدم</button><div id="users-error" class="err"></div></div>';document.body.appendChild(el);wirePasswordButtons(el);loadUsers();document.getElementById('create-user').onclick=async()=>{const permissions={};el.querySelectorAll('[data-perm]:checked').forEach(x=>permissions[x.dataset.perm]=true);const body={displayName:document.getElementById('new-display').value,username:document.getElementById('new-username').value,password:document.getElementById('new-password').value,role:document.getElementById('new-role').value,permissions};const r=await fetch('/api/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),d=await r.json();if(!r.ok){document.getElementById('users-error').textContent=d.error;return}document.getElementById('users-error').textContent='تم إنشاء المستخدم';loadUsers()}}
   async function loadUsers(){const box=document.getElementById('users-list');if(!box)return;const r=await fetch('/api/users'),d=await r.json();if(!r.ok){box.textContent=d.error;return}box.innerHTML=d.users.map(u=>'<div class="user-row"><span><b>'+u.displayName+'</b> ('+u.username+') — '+(u.role==='admin'?'مدير':'موظف')+'</span>'+(u.id===currentUser.id?'': '<button onclick="window.deleteERPUser('+u.id+')">حذف</button>')+'</div>').join('')}
@@ -14549,6 +14654,19 @@ goTo('overview');
    مفتوحة اللي بتتولد تلقائياً من v27/v34) في مكان واحد بدل ما يتوهوا بين الشاشات */
 (function(){
   function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+  function getLowStock(){
+    const stock = getInventoryStock();
+    return stock.map(s=>{
+      const outMoves = STORE.inventory_moves.filter(m=>m.item_id===s.item.id && m.direction==='out');
+      if(outMoves.length===0) return null;
+      const dates = outMoves.map(m=>new Date(m.date)).sort((a,b)=>a-b);
+      const spanDays = Math.max(1, Math.round((dates[dates.length-1]-dates[0])/86400000));
+      const totalOut = outMoves.reduce((s2,m)=>s2+m.qty,0);
+      const dailyRate = totalOut/Math.max(spanDays,30);
+      const daysLeft = dailyRate>0 ? Math.round(s.qty/dailyRate) : null;
+      return (daysLeft!==null && daysLeft<=14) ? {item:s.item, qty:s.qty, daysLeft} : null;
+    }).filter(Boolean);
+  }
   function getNotifications(){
     const now = todayISO();
     const overdue = (STORE.custom_txns||[]).filter(t=>(t.category==='فاتورة بيع'||t.category==='فاتورة صيانة') && t.payment_mode==='credit' && !t.paid && (t.due_date||'')<now)
@@ -14558,8 +14676,9 @@ goTo('overview');
       });
     const followups = (STORE.followups||[]).filter(f=>!f.done)
       .map(f=>({type:'followup', id:f.id, title:f.title||'متابعة', meta:(f.customer?'العميل: '+f.customer:'') + (f.ref?' — '+f.ref:''), priority:f.priority||'عادية'}));
+    const lowStock = getLowStock().map(r=>({type:'stock', id:r.item.id, title:'نقص وشيك - '+r.item.name, meta:'الرصيد الحالي: '+fmt(r.qty)+' — متبقي تقديرياً '+r.daysLeft+' يوم', priority: r.daysLeft<=7?'عاجلة':'مهمة'}));
     const order = {'عاجلة':0,'مهمة':1,'عادية':2};
-    return overdue.concat(followups).sort((a,b)=>(order[a.priority]??3)-(order[b.priority]??3));
+    return overdue.concat(followups).concat(lowStock).sort((a,b)=>(order[a.priority]??3)-(order[b.priority]??3));
   }
   window.renderNotifPanel = function(){
     const items = getNotifications();
@@ -14569,11 +14688,11 @@ goTo('overview');
     if(!panel) return;
     panel.innerHTML = '<h4>الإشعارات والمتابعات ('+items.length+')</h4>' + (items.length ? items.map(it=>`
       <div class="notif-item">
-        <div class="notif-title">${it.type==='overdue'?'💰 ':'📌 '}${esc(it.title)}</div>
+        <div class="notif-title">${it.type==='overdue'?'💰 ':(it.type==='stock'?'📦 ':'📌 ')}${esc(it.title)}</div>
         <div class="notif-meta">${esc(it.meta)}</div>
         <div class="notif-actions">
           ${it.type==='followup' ? `<button onclick="completeFollowup('${it.id}'); window.toggleNotifPanel(false);">تمت المتابعة</button>` : ''}
-          <button onclick="window.toggleNotifPanel(false); ${it.type==='overdue' ? "goToSectionSub('finance','receivables_due')" : "goTo('sales')"};">فتح</button>
+          <button onclick="window.toggleNotifPanel(false); ${it.type==='overdue' ? "goToSectionSub('finance','receivables_due')" : (it.type==='stock' ? "goTo('inventory')" : "goTo('sales')")};">فتح</button>
         </div>
       </div>
     `).join('') : '<div class="notif-empty">مفيش حاجة محتاجة انتباهك دلوقتي 👍</div>');
