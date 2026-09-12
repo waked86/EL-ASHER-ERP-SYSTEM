@@ -64,5 +64,8 @@ app.post('/api/ai/summarize',requireAuth,async(req,res)=>{
     res.json({text});
   }catch(e){ res.status(500).json({error:'خطأ غير متوقع: '+e.message}); }
 });
+app.get('/manifest.json',(_req,res)=>res.sendFile(path.join(__dirname,'manifest.json')));
+app.get('/sw.js',(_req,res)=>res.type('application/javascript').sendFile(path.join(__dirname,'sw.js')));
+app.use('/icons', express.static(path.join(__dirname,'icons')));
 app.get('*',(_req,res)=>res.sendFile(path.join(__dirname,'index.html')));
 (async()=>{try{if(pool)await dbReady();app.listen(port,()=>console.log(`ERP server listening on ${port}`))}catch(e){console.error(e);process.exit(1)}})();

@@ -7,7 +7,10 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="مصنع العاشر">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#12233F">
+<meta name="theme-color" content="#0B1E3D">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<link rel="icon" href="/icons/icon-192.png">
 <title>لوحة تحكم مصنع العاشر للصناعات الحديدية والخشبية</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@500;700;900&family=Cairo:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
@@ -109,7 +112,10 @@
   .notif-item .notif-actions{ display:flex; gap:6px; margin-top:4px; }
   .notif-item .notif-actions button{ font-size:11px; padding:3px 8px; border-radius:6px; border:1px solid var(--line); background:#fff; cursor:pointer; }
   .notif-empty{ padding:20px; text-align:center; color:var(--slate); font-size:12.5px; }
-  @media (max-width:720px){ #notif-panel{ left:auto; right:0; width:90vw; } }
+  @media (max-width:720px){
+    #notif-panel{ position:fixed; top:64px; left:12px; right:12px; width:auto; max-width:none; }
+    #global-search-results{ position:fixed; top:64px; left:12px; right:12px; }
+  }
   #content{ padding:24px 28px 60px; max-width:1400px; }
 
   .section-eyebrow{ display:flex; align-items:center; gap:8px; color:var(--wood); font-weight:700; font-size:12.5px; letter-spacing:.5px; margin-bottom:6px; text-transform:uppercase;}
@@ -14484,8 +14490,92 @@ goTo('overview');
  const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
  const user=()=>document.body.dataset.user||'current-user';
  function tasks(){return STORE.user_tasks||(STORE.user_tasks=[])}
- window.renderUserTasks=function(el){const ts=tasks().filter(t=>t.owner===user()||!t.owner);el.innerHTML=`<div class="card"><h3>مهامي الشخصية</h3><div class="small-note">سجّل أي مهمة أثناء انشغالك، وسيظل التنبيه ظاهرًا حتى تضغط تمت.</div><div class="toolbar" style="flex-wrap:wrap"><input class="field" id="task-title" placeholder="المهمة المطلوبة" style="flex:1;min-width:240px"><input class="field" id="task-due" type="datetime-local"><select class="field" id="task-priority"><option>عادية</option><option>مهمة</option><option>عاجلة</option></select><input class="field" id="task-note" placeholder="ملاحظات"><button class="btn" id="task-add">+ حفظ المهمة</button></div></div><div class="card" style="margin-top:16px"><h3>المهام المفتوحة</h3><div class="scroll-table"><table><thead><tr><th>المهمة</th><th>الموعد</th><th>الأولوية</th><th>ملاحظات</th><th></th></tr></thead><tbody>${ts.filter(t=>!t.done).sort((a,b)=>String(a.due).localeCompare(String(b.due))).map(t=>`<tr><td>${esc(t.title)}</td><td>${t.due?new Date(t.due).toLocaleString('ar-EG'):'فوراً'}</td><td>${esc(t.priority)}</td><td>${esc(t.note||'-')}</td><td><button class="btn ghost" onclick="completeUserTask('${t.id}')">تمت</button></td></tr>`).join('')||'<tr><td colspan="5">لا توجد مهام مفتوحة</td></tr>'}</tbody></table></div></div>`;document.getElementById('task-add').onclick=()=>{const title=document.getElementById('task-title').value.trim();if(!title)return alert('اكتب المهمة');tasks().push({id:uid('task'),owner:user(),title,due:document.getElementById('task-due').value?new Date(document.getElementById('task-due').value).toISOString():new Date().toISOString(),priority:document.getElementById('task-priority').value,note:document.getElementById('task-note').value,done:false});saveStore();renderUserTasks(el)}};
- window.completeUserTask=id=>{const t=tasks().find(x=>x.id===id);if(t){t.done=true;t.completed_at=new Date().toISOString();saveStore();goTo('sales')}};
+ window.renderUserTasks=function(el){
+  const all = tasks();
+  const emps = (STORE.employees||[]).filter(e=>e.active!==false);
+  function esc2(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+  function taskRow(t){
+    const assignee = t.assigned_to ? (emps.find(e=>e.id===t.assigned_to)?.name || t.assigned_to) : 'غير محدد';
+    return `<tr>
+      <td style="font-weight:700">${esc2(t.title)}</td>
+      <td>${esc2(assignee)}</td>
+      <td>${esc2(t.related||'-')}</td>
+      <td style="font-size:12px;max-width:220px;white-space:normal">${esc2(t.description||'-')}</td>
+      <td>${t.due?new Date(t.due).toLocaleString('ar-EG'):'-'}</td>
+      <td><span class="pill ${t.priority==='عاجلة'?'red':(t.priority==='مهمة'?'gold':'slate')}">${esc2(t.priority)}</span></td>
+      <td>
+        <select class="field" style="font-size:11.5px;padding:4px 8px" onchange="updateTaskStatus('${t.id}', this.value)">
+          ${['لم يبدأ','جاري التنفيذ','تم'].map(s=>`<option value="${s}" ${t.status===s?'selected':''}>${s}</option>`).join('')}
+        </select>
+      </td>
+      <td><button class="btn ghost" style="padding:4px 9px;font-size:11px;color:var(--danger)" onclick="deleteUserTask('${t.id}')">حذف</button></td>
+    </tr>`;
+  }
+  const open = all.filter(t=>t.status!=='تم').sort((a,b)=>String(a.due).localeCompare(String(b.due)));
+  const done = all.filter(t=>t.status==='تم').sort((a,b)=>String(b.completed_at||'').localeCompare(String(a.completed_at||'')));
+  el.innerHTML = `
+    <div class="section-eyebrow">✅ مهام العمل</div>
+    <div class="section-title">مهام مفصّلة بمسؤول ومرجع وحالة - مش تذكير بسيط، متابعة شغل فعلية</div>
+    <div class="card">
+      <h3>مهمة جديدة</h3>
+      <div class="toolbar" style="flex-wrap:wrap">
+        <input class="field" id="task-title" placeholder="عنوان المهمة" style="flex:1;min-width:220px">
+        <select class="field" id="task-assignee" style="min-width:160px">
+          <option value="">غير محدد / لأي حد</option>
+          ${emps.map(e=>`<option value="${e.id}">${e.name}</option>`).join('')}
+        </select>
+        <input class="field" id="task-related" placeholder="مرتبطة بـ (عميل / رقم فاتورة / أمر إنتاج...)" style="flex:1;min-width:200px">
+      </div>
+      <textarea class="field" id="task-description" placeholder="تفاصيل الشغل المطلوب بالظبط - خطوات، ملاحظات، أي حاجة تساعد اللي هينفذها" style="width:100%;min-height:80px;margin-top:10px;font-family:'Cairo';padding:10px;border-radius:10px"></textarea>
+      <div class="toolbar" style="margin-top:10px">
+        <input class="field" id="task-due" type="datetime-local">
+        <select class="field" id="task-priority"><option>عادية</option><option>مهمة</option><option>عاجلة</option></select>
+        <button class="btn" style="margin-right:auto" onclick="submitUserTask()">+ حفظ المهمة</button>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3>المهام المفتوحة <span class="tag">${open.length}</span></h3>
+      <div class="scroll-table" style="max-height:420px"><table><thead><tr><th>المهمة</th><th>المسؤول</th><th>مرتبطة بـ</th><th>التفاصيل</th><th>الموعد</th><th>الأولوية</th><th>الحالة</th><th></th></tr></thead><tbody>
+      ${open.map(taskRow).join('') || '<tr><td colspan="8" class="empty-note">لا توجد مهام مفتوحة 🎉</td></tr>'}
+      </tbody></table></div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3>مهام مكتملة <span class="tag">${done.length}</span></h3>
+      <div class="scroll-table" style="max-height:260px"><table><thead><tr><th>المهمة</th><th>المسؤول</th><th>مرتبطة بـ</th><th>التفاصيل</th><th>الموعد</th><th>الأولوية</th><th>الحالة</th><th></th></tr></thead><tbody>
+      ${done.map(taskRow).join('') || '<tr><td colspan="8" class="empty-note">لا توجد مهام مكتملة بعد</td></tr>'}
+      </tbody></table></div>
+    </div>
+  `;
+};
+window.submitUserTask=function(){
+  const title = document.getElementById('task-title').value.trim();
+  if(!title){ alert('اكتب عنوان المهمة'); return; }
+  tasks().push({
+    id: uid('task'), owner: user(), title,
+    assigned_to: document.getElementById('task-assignee').value || null,
+    related: document.getElementById('task-related').value.trim(),
+    description: document.getElementById('task-description').value.trim(),
+    due: document.getElementById('task-due').value ? new Date(document.getElementById('task-due').value).toISOString() : null,
+    priority: document.getElementById('task-priority').value,
+    status: 'لم يبدأ', done:false,
+  });
+  saveStore();
+  goTo('todo');
+};
+window.updateTaskStatus=function(id, status){
+  const t = tasks().find(x=>x.id===id);
+  if(!t) return;
+  t.status = status; t.done = status==='تم';
+  if(status==='تم') t.completed_at = new Date().toISOString();
+  saveStore();
+  goTo('todo');
+};
+window.deleteUserTask=function(id){
+  STORE.user_tasks = tasks().filter(t=>t.id!==id);
+  saveStore();
+  goTo('todo');
+};
+window.completeUserTask=id=>{ window.updateTaskStatus(id, 'تم'); };
  function checkTasks(){const now=Date.now();tasks().filter(t=>(t.owner===user()||!t.owner)&&!t.done&&(!t.due||new Date(t.due).getTime()<=now)&&(!t.last_notified||now-t.last_notified>=7200000)).forEach(t=>{t.last_notified=now;saveStore();if('Notification'in window&&Notification.permission==='granted')new Notification('مهمة مفتوحة',{body:t.title});})}setInterval(checkTasks,60000);setTimeout(checkTasks,5000);
  const oldEmp=window.renderHREmployeesSub;if(oldEmp){window.renderHREmployeesSub=function(el){oldEmp(el);const box=document.createElement('div');box.className='card';const es=STORE.employees||[];const count=k=>es.filter(e=>e[k]).length;box.innerHTML=`<h3>تحليل بيانات الموظفين</h3><div class="kpi-row"><div class="kpi"><div class="lbl">إجمالي الموظفين</div><div class="val">${es.length}</div></div><div class="kpi"><div class="lbl">مؤهل جامعي</div><div class="val">${es.filter(e=>e.qualification==='جامعى'||e.qualification==='جامعي').length}</div></div><div class="kpi"><div class="lbl">متزوج</div><div class="val">${es.filter(e=>e.marital_status==='متزوج').length}</div></div><div class="kpi"><div class="lbl">أدى الخدمة العسكرية</div><div class="val">${es.filter(e=>e.military_status==='أدى الخدمة').length}</div></div></div><button class="btn ghost" id="emp-cv-all">طباعة ملخص الموظفين</button></div>`;el.appendChild(box);document.getElementById('emp-cv-all').onclick=()=>{const html='<h2>ملخص الموظفين</h2><table><tr><th>الاسم</th><th>القسم</th><th>المؤهل</th><th>الحالة الاجتماعية</th><th>التجنيد</th></tr>'+es.map(e=>`<tr><td>${esc(e.name)}</td><td>${esc(e.department||'')}</td><td>${esc(e.qualification||'-')}</td><td>${esc(e.marital_status||'-')}</td><td>${esc(e.military_status||'-')}</td></tr>`).join('')+'</table>';printReport('تحليل الموظفين',html)}}}
  const oldOpen=window.openHRForm;if(oldOpen){window.openHRForm=function(id){oldOpen(id);const box=document.getElementById('hr-form-box');if(!box)return;const e=(STORE.employees||[]).find(x=>x.id===id)||{};const extra=document.createElement('div');extra.className='card';extra.innerHTML=`<h4>بيانات إضافية للموظف</h4><div class="toolbar" style="flex-wrap:wrap"><select class="field" id="emp-marital"><option value="">الحالة الاجتماعية</option><option>متزوج</option><option>اعزب</option><option>مطلق</option><option>ارمل</option></select><select class="field" id="emp-qual"><option value="">المؤهل</option><option>بدون</option><option>طالب</option><option>اعدادية</option><option>متوسط</option><option>فوق متوسط</option><option>جامعى</option></select><select class="field" id="emp-military"><option value="">الموقف من التجنيد</option><option>أدى الخدمة</option><option>معفى من الخدمة</option><option>مؤجل</option></select><input class="field" id="emp-bank" placeholder="اسم البنك"><input class="field" id="emp-account" placeholder="رقم الحساب البنكي"></div><button class="btn ghost" id="emp-cv">طباعة C.V للموظف</button>`;box.appendChild(extra);document.getElementById('emp-marital').value=e.marital_status||'';document.getElementById('emp-qual').value=e.qualification||'';document.getElementById('emp-military').value=e.military_status||'';document.getElementById('emp-bank').value=e.bank_name||'';document.getElementById('emp-account').value=e.bank_account||'';const save=document.getElementById('hr-save');if(save){const old=save.onclick;save.onclick=()=>{const data={marital_status:document.getElementById('emp-marital').value,qualification:document.getElementById('emp-qual').value,military_status:document.getElementById('emp-military').value,bank_name:document.getElementById('emp-bank').value,bank_account:document.getElementById('emp-account').value};old();const x=(STORE.employees||[]).find(z=>z.id===(id||STORE.employees.at(-1)?.id));if(x)Object.assign(x,data);saveStore()}}document.getElementById('emp-cv').onclick=()=>{const x=(STORE.employees||[]).find(z=>z.id===id)||{};printReport('C.V - '+(x.name||''),`<h2>${esc(x.name||'')}</h2><p>القسم: ${esc(x.department||'-')} | الوظيفة: ${esc(x.role||'-')}</p><p>الهاتف: ${esc(x.phone||'-')} | الرقم القومي: ${esc(x.national_id||'-')}</p><p>المؤهل: ${esc(x.qualification||'-')} | الحالة الاجتماعية: ${esc(x.marital_status||'-')}</p><p>الموقف من التجنيد: ${esc(x.military_status||'-')}</p><p>البنك: ${esc(x.bank_name||'-')} | الحساب: ${esc(x.bank_account||'-')}</p><p>تاريخ التعيين: ${esc(x.hire_date||'-')}</p><p>ملاحظات: ${esc(x.notes||'-')}</p>`)}}}
@@ -14732,6 +14822,9 @@ goTo('overview');
   setTimeout(window.renderNotifPanel, 800);
   setInterval(window.renderNotifPanel, 60000);
 })();
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{ navigator.serviceWorker.register('/sw.js').catch(()=>{}); });
+}
 </script>
 </body>
 </html>
