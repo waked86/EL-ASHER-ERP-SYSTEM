@@ -911,6 +911,7 @@ function currentYear(){ return new Date().getFullYear(); }
 function getAllAccountsLight(){
   const extra = STORE.custom_accounts.map(a=>({
     sheet:a.sheet, name:a.name, code:a.code||"-", type:a.type,
+    phone:a.phone||'', address:a.address||'', credit_limit: Number(a.credit_limit)||0,
     asof: null, balance:0, total_debit:0, total_credit:0, n_debit:0, n_credit:0,
     first_date:null, last_date:null, span_days:null, daily_rate:0, dso_estimate:null, days_since_last_txn:null, is_custom:true
   }));
@@ -7117,13 +7118,14 @@ function submitSalaryPayment(emp_id, from, to, base, advancesTotal, overtimeTota
 
 /* ===== v10/sections_final_v10.js ===== */
 /* ============ SECTIONS FINAL RECONFIG (v10) - re-register all sections with latest overridden functions ============ */
-SECTIONS.sales = {title:"المبيعات", sub:"فاتورة جديدة، سند تحصيل، مقايسة صيانة، تحليل بالفترة، تقرير أصناف، تقرير صيانة، الأهداف والتحقيق", standalone:false, subs:[
+SECTIONS.sales = {title:"المبيعات", sub:"فاتورة جديدة، سند تحصيل، مقايسة صيانة، تحليل بالفترة، تقرير أصناف، تقرير صيانة، ربحية العملاء، الأهداف والتحقيق", standalone:false, subs:[
   {key:'invoice', label:'فاتورة جديدة', render: renderSalesInvoiceSub},
   {key:'collection', label:'سند تحصيل', render: renderCustCollectionSub},
   {key:'maintenance_estimate', label:'مقايسة صيانة', render: renderMaintenanceEstimateSub},
   {key:'analysis', label:'تحليل العملاء (بالفترة)', render: renderSalesAnalysisSub},
   {key:'items', label:'تقرير أصناف', render: renderSalesItemsSub},
   {key:'maintenance', label:'تقرير صيانة', render: renderSalesMaintenanceSub},
+  {key:'profitability', label:'ربحية العملاء والأصناف', render: renderProfitabilitySub},
   {key:'targets', label:'الأهداف والتحقيق', render: renderTargetsSub},
 ]};
 
@@ -9157,6 +9159,23 @@ function setAccountPhone(sheet, phone){
   const acc = STORE.custom_accounts.find(a=>a.sheet===sheet);
   if(acc) { acc.phone = phone; saveStore(); }
 }
+function setCreditLimit(sheet){
+  const acc = getAllAccountsLight().find(a=>a.sheet===sheet);
+  const current = acc ? acc.credit_limit : 0;
+  const val = prompt('حد الائتمان المسموح به لهذا العميل (جنيه) - اكتب 0 لإلغاء الحد:', current||0);
+  if(val===null) return;
+  const limit = Number(val)||0;
+  let custAcc = STORE.custom_accounts.find(a=>a.sheet===sheet);
+  if(!custAcc){
+    // العميل من الأرشيف القديم مفيش له سجل custom_accounts بعد - ننشئ سجل مرجعي بس لحفظ حد الائتمان
+    custAcc = {sheet, name:acc?acc.name:sheet, code:acc?acc.code:'', type:'customer', credit_limit:limit};
+    STORE.custom_accounts.push(custAcc);
+  } else {
+    custAcc.credit_limit = limit;
+  }
+  saveStore();
+  openStatement(sheet);
+}
 
 function renderSalesInvoiceSub(el){
   const today = todayISO();
@@ -10654,7 +10673,9 @@ function openStatement(sheet){
     <div class="small-note" style="margin-bottom:14px">الكود: <b class="nums">${acc.code||'-'}</b>
       <button class="btn ghost" style="padding:2px 10px;font-size:11px;margin-right:8px" onclick="promptEditAccountCode('${sheet.replace(/'/g,"\\'")}')">تعديل الكود</button>
       ${acc.type==='customer'?`<button class="btn ghost" style="padding:2px 10px;font-size:11px;margin-right:6px" onclick="goToCustomerProfile('${sheet.replace(/'/g,"\\'")}')">📁 الملف الكامل (بيانات ومستندات)</button>`:''}
+      ${acc.type==='customer'?`<button class="btn ghost" style="padding:2px 10px;font-size:11px;margin-right:6px" onclick="setCreditLimit('${sheet.replace(/'/g,"\\'")}')">💳 حد الائتمان: ${acc.credit_limit?fmtEGP(acc.credit_limit):'غير محدد'}</button>`:''}
       &nbsp;|&nbsp; النوع: ${acc.type==='supplier'?'مورد':'عميل'} ${acc.is_custom?' &nbsp;|&nbsp; <span class="pill gold">حساب مُضاف يدوياً</span>':''}</div>
+    ${(acc.type==='customer' && acc.credit_limit>0 && acc.balance>acc.credit_limit) ? `<div class="card" style="border:2px solid var(--danger);margin-bottom:14px"><b style="color:var(--danger)">⚠️ العميل تجاوز حد الائتمان المسموح!</b> الرصيد الحالي ${fmtEGP(acc.balance)} أكبر من الحد المسموح ${fmtEGP(acc.credit_limit)}</div>` : ''}
     <div class="kpi-row" style="grid-template-columns:repeat(4,1fr)">
       <div class="kpi"><div class="lbl">الرصيد الحالي (كامل التاريخ)</div><div class="val" style="color:${acc.balance>1?'var(--danger)':(acc.balance<-1?'var(--success)':'var(--ink)')}">${fmtEGP(acc.balance)}</div></div>
       <div class="kpi"><div class="lbl">إجمالي مدين</div><div class="val">${fmtEGP(acc.total_debit)}</div></div>
@@ -12296,6 +12317,82 @@ function runProductionCost(){
       </tbody></table></div>
     </div>
     <div class="small-note">"الهالك" = الفرق بين الكمية المستهدفة والمُنتجة فعليًا لكل أمر - وكلما زاد، ارتفعت تكلفة الوحدة تلقائيًا لأن نفس تكلفة الخامة اتقسمت على وحدات أقل. تكلفة العمالة والتشغيلية بتتسجل يدويًا عند إتمام كل أمر إنتاج (اختياري).</div>
+  `;
+}
+
+/* ============ ربحية العملاء والأصناف - باستخدام تكلفة الإنتاج الفعلية المسجلة ============ */
+function getProductCostMap(){
+  // متوسط تكلفة الوحدة الكاملة (خامة+عمالة+تشغيل) لكل منتج، من أوامر الإنتاج المكتملة
+  const map = {};
+  STORE.production_orders.filter(o=>o.status==='مكتمل' && o.qty_done>0).forEach(o=>{
+    let materialCost = 0;
+    (o.raw_materials||[]).forEach(m=>{
+      const moves = STORE.inventory_moves.filter(mv=>mv.item_id===m.item_id && mv.direction==='in' && mv.unit_cost>0);
+      const avgCost = moves.length ? moves.reduce((s,mv)=>s+mv.unit_cost,0)/moves.length : 0;
+      materialCost += m.qty*avgCost;
+    });
+    const fullCost = materialCost + (o.labor_cost||0) + (o.overhead_cost||0);
+    const key = (o.product_name||'').trim().toLowerCase();
+    if(!key) return;
+    if(!map[key]) map[key] = {totalCost:0, totalQty:0};
+    map[key].totalCost += fullCost;
+    map[key].totalQty += o.qty_done;
+  });
+  const costPerUnit = {};
+  Object.entries(map).forEach(([k,v])=>{ costPerUnit[k] = v.totalQty ? v.totalCost/v.totalQty : 0; });
+  return costPerUnit;
+}
+function renderProfitabilitySub(el){
+  const costMap = getProductCostMap();
+  const hasCostData = Object.keys(costMap).length>0;
+  const sales = STORE.custom_txns.filter(t=>t.category==='فاتورة بيع');
+
+  const byCustomer = {}, byProduct = {};
+  sales.forEach(t=>{
+    const custKey = t.sheet || t.customer_name || '-';
+    const custName = (getAllAccountsLight().find(a=>a.sheet===t.sheet)||{}).name || t.customer_name || '-';
+    if(!byCustomer[custKey]) byCustomer[custKey] = {name:custName, revenue:0, cost:0, matchedRevenue:0};
+    (t.items||[{desc:t.desc, qty:1, total:t.amount}]).forEach(it=>{
+      const key = (it.desc||'').trim().toLowerCase();
+      const total = Number(it.total)||0;
+      const qty = Number(it.qty)||0;
+      byCustomer[custKey].revenue += total;
+      if(!byProduct[key]) byProduct[key] = {name:it.desc||'-', qty:0, revenue:0, cost:0, matched:false};
+      byProduct[key].qty += qty; byProduct[key].revenue += total;
+      if(costMap[key]!==undefined){
+        const cost = qty*costMap[key];
+        byCustomer[custKey].cost += cost;
+        byCustomer[custKey].matchedRevenue += total;
+        byProduct[key].cost += cost;
+        byProduct[key].matched = true;
+      }
+    });
+  });
+
+  const custRows = Object.values(byCustomer).map(c=>({...c, margin: c.matchedRevenue - c.cost, marginPct: c.matchedRevenue ? (c.matchedRevenue-c.cost)/c.matchedRevenue*100 : null})).sort((a,b)=>b.revenue-a.revenue);
+  const prodRows = Object.values(byProduct).map(p=>({...p, margin: p.matched ? p.revenue-p.cost : null, marginPct: p.matched && p.revenue ? (p.revenue-p.cost)/p.revenue*100 : null})).sort((a,b)=>b.revenue-a.revenue);
+
+  el.innerHTML = `
+    <div class="section-eyebrow">📊 ربحية العملاء والأصناف</div>
+    <div class="section-title">هامش الربح الحقيقي = سعر البيع - تكلفة الإنتاج الفعلية (خامة + عمالة + تشغيل)</div>
+    ${!hasCostData ? `<div class="card" style="border:1px solid var(--gold)"><b>محتاج بيانات تكلفة الأول:</b> لسه معندكش أوامر إنتاج مكتملة ومُكلَّفة (من تبويب "تكلفة الإنتاج"). لحد ما تسجل أول أمر إنتاج بتكلفته، الأرباح هتظهر "غير معروفة".</div>` : ''}
+    <div class="card">
+      <h3>ربحية حسب العميل</h3>
+      <div class="small-note" style="margin-bottom:8px">الهامش محسوب بس على الأصناف اللي عندها تكلفة إنتاج مسجلة (نفس اسم المنتج في أمر الإنتاج). لو اسم الصنف في الفاتورة مختلف شوية عن اسم المنتج في أمر الإنتاج، وحّد الأسماء عشان المطابقة تظبط.</div>
+      <div class="scroll-table" style="max-height:380px"><table><thead><tr><th>العميل</th><th>إجمالي المبيعات</th><th>منها له تكلفة معروفة</th><th>هامش الربح</th><th>نسبة الهامش</th></tr></thead><tbody>
+      ${custRows.map(c=>`<tr><td>${c.name}</td><td class="nums">${fmtEGP(c.revenue)}</td><td class="nums">${fmtEGP(c.matchedRevenue)}</td>
+      <td class="nums" style="font-weight:700;color:${c.margin>=0?'var(--success)':'var(--danger)'}">${c.marginPct!==null?fmtEGP(c.margin):'-'}</td>
+      <td class="nums">${c.marginPct!==null?fmt(c.marginPct,1)+'%':'غير معروف'}</td></tr>`).join('') || '<tr><td colspan="5" class="empty-note">لا توجد مبيعات مسجلة بعد</td></tr>'}
+      </tbody></table></div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3>ربحية حسب الصنف</h3>
+      <div class="scroll-table" style="max-height:380px"><table><thead><tr><th>الصنف</th><th>الكمية المباعة</th><th>إجمالي الإيراد</th><th>هامش الربح</th><th>نسبة الهامش</th></tr></thead><tbody>
+      ${prodRows.map(p=>`<tr><td>${p.name}</td><td class="nums">${fmt(p.qty)}</td><td class="nums">${fmtEGP(p.revenue)}</td>
+      <td class="nums" style="font-weight:700;color:${p.margin>=0?'var(--success)':'var(--danger)'}">${p.margin!==null?fmtEGP(p.margin):'غير معروف'}</td>
+      <td class="nums">${p.marginPct!==null?fmt(p.marginPct,1)+'%':'-'}</td></tr>`).join('') || '<tr><td colspan="5" class="empty-note">لا توجد مبيعات مسجلة بعد</td></tr>'}
+      </tbody></table></div>
+    </div>
   `;
 }
 
@@ -14273,7 +14370,7 @@ function importEmployeesFromWorkbook(){
 /* maintenance quote -> maintenance report) first, analytical reports after. */
 (function reorderSalesSubs(){
   const order = ['invoice','collection','quote','supply_orders','equipment_receipt','maintenance_estimate','maintenance',
-                 'analysis','items','targets','performance','kpis','pipeline','pricing','monthly_breakdown'];
+                 'analysis','items','profitability','targets','performance','kpis','pipeline','pricing','monthly_breakdown'];
   const bySubKey = {};
   SECTIONS.sales.subs.forEach(s=>{ bySubKey[s.key] = s; });
   const reordered = order.map(k=>bySubKey[k]).filter(Boolean);
@@ -14749,7 +14846,7 @@ window.completeUserTask=id=>{ window.updateTaskStatus(id, 'تم'); };
  const oldRender=window.renderSalesInvoiceSub;
  window.renderSalesInvoiceSub=function(el){oldRender(el);const card=el.querySelector('.card');if(!card)return;const note=document.getElementById('sale-note');const box=document.createElement('div');box.className='card';box.style.marginTop='10px';box.innerHTML=`<h4>شروط السداد</h4><div class="toolbar" style="flex-wrap:wrap"><select class="field" id="sale-payment-mode"><option value="cash">نقدي</option><option value="credit">آجل</option></select><input class="field" id="sale-credit-days" type="number" min="0" value="30" placeholder="مدة الائتمان بالأيام" style="width:190px"><input class="field" id="sale-credit-note" placeholder="اتفاق الائتمان / ملاحظات" style="flex:1;min-width:220px"></div><div class="small-note">في حالة الآجل سيحسب النظام تاريخ الاستحقاق تلقائيًا من تاريخ الفاتورة.</div>`;note?.parentElement?.insertAdjacentElement('afterend',box);};
  const oldSubmit=window.submitSaleInvoice;
- window.submitSaleInvoice=function(){const mode=document.getElementById('sale-payment-mode')?.value||'cash';const days=mode==='credit'?Number(document.getElementById('sale-credit-days')?.value||0):0;const note=document.getElementById('sale-credit-note')?.value||'';window.__pendingCredit={mode,days,note};oldSubmit();const last=tx()[tx().length-1];if(last){last.payment_mode=mode;last.credit_days=days;last.due_date=mode==='credit'?due(last.date,days):last.date;last.credit_note=note;saveStore()}};
+ window.submitSaleInvoice=function(){const mode=document.getElementById('sale-payment-mode')?.value||'cash';const days=mode==='credit'?Number(document.getElementById('sale-credit-days')?.value||0):0;const note=document.getElementById('sale-credit-note')?.value||'';window.__pendingCredit={mode,days,note};oldSubmit();const last=tx()[tx().length-1];if(last){last.payment_mode=mode;last.credit_days=days;last.due_date=mode==='credit'?due(last.date,days):last.date;last.credit_note=note;saveStore();if(mode==='credit'){const acc=getAllAccountsLight().find(a=>a.sheet===last.sheet);if(acc&&acc.credit_limit>0&&acc.balance>acc.credit_limit){alert('⚠️ تنبيه: العميل '+acc.name+' تجاوز حد الائتمان المسموح له!\\nالرصيد الحالي: '+fmtEGP(acc.balance)+'\\nالحد المسموح: '+fmtEGP(acc.credit_limit))}}}};
  window.renderReceivablesDue=function(el){const rows=tx().filter(t=>(t.category==='فاتورة بيع'||t.category==='فاتورة صيانة')&&t.payment_mode==='credit'&&!t.paid);const now=todayISO();const open=rows.filter(t=>(t.due_date||'')>=now),late=rows.filter(t=>(t.due_date||'')<now);el.innerHTML=`<div class="kpi-row"><div class="kpi"><div class="lbl">إجمالي الآجل المفتوح</div><div class="val">${fmtEGP(rows.reduce((s,t)=>s+Number(t.amount||0),0))}</div></div><div class="kpi"><div class="lbl">مستحق ولم يُسدّد</div><div class="val" style="color:var(--danger)">${fmtEGP(late.reduce((s,t)=>s+Number(t.amount||0),0))}</div></div><div class="kpi"><div class="lbl">لم يحن موعده</div><div class="val" style="color:var(--success)">${fmtEGP(open.reduce((s,t)=>s+Number(t.amount||0),0))}</div></div></div><div class="card"><h3>تقرير الفواتير الآجلة والاستحقاقات</h3><div class="small-note">الاستحقاق = تاريخ الفاتورة + مدة الائتمان. عند التحصيل يتم إغلاق الفاتورة من خلال تسجيل التحصيل المرتبط بالحساب.</div><div class="scroll-table"><table><thead><tr><th>الفاتورة</th><th>العميل</th><th>تاريخ الفاتورة</th><th>مدة الائتمان</th><th>الاستحقاق</th><th>القيمة</th><th>الحالة</th></tr></thead><tbody>${rows.sort((a,b)=>(a.due_date||'').localeCompare(b.due_date||'')).map(t=>{const a=getAllAccountsLight().find(x=>x.sheet===t.sheet);const late=(t.due_date||'')<now;return `<tr><td>${esc(t.doc_no||'-')}</td><td>${esc(a?.name||t.sheet||'-')}</td><td>${t.date||'-'}</td><td>${t.credit_days||0} يوم</td><td>${t.due_date||'-'}</td><td class="nums">${fmtEGP(t.amount)}</td><td><span class="pill ${late?'red':'green'}">${late?'متأخر':'مفتوح'}</span></td></tr>`}).join('')||'<tr><td colspan="7">لا توجد فواتير آجلة مفتوحة</td></tr>'}</tbody></table></div></div>`};
  window.renderDailyExpensesEnhanced=function(el){const es=STORE.expenses||[];el.innerHTML=`<div class="kpi-row"><div class="kpi"><div class="lbl">مصروفات الشهر</div><div class="val" style="color:var(--danger)">${fmtEGP(es.filter(e=>(e.date||'').startsWith(todayISO().slice(0,7))).reduce((s,e)=>s+Number(e.amount||0),0))}</div></div><div class="kpi"><div class="lbl">عدد القيود</div><div class="val">${es.length}</div></div></div><div class="card"><h3>المصروفات اليومية</h3><div class="toolbar" style="flex-wrap:wrap"><input class="field" type="date" id="dx-date" value="${todayISO()}"><select class="field" id="dx-cat">${EXPENSE_CATS.map(c=>`<option>${c}</option>`).join('')}</select><input class="field" id="dx-desc" placeholder="بيان واضح للمصروف" style="flex:1"><input class="field" type="number" id="dx-amount" placeholder="المبلغ"><button class="btn" id="dx-add">+ تسجيل مصروف</button></div><div class="scroll-table"><table><thead><tr><th>التاريخ</th><th>التصنيف</th><th>البيان</th><th>المبلغ</th><th></th></tr></thead><tbody>${es.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(e=>`<tr><td>${e.date}</td><td>${esc(e.category)}</td><td>${esc(e.description||'-')}</td><td class="nums">${fmtEGP(e.amount)}</td><td><button class="btn ghost" onclick="deleteExpense('${e.id}');goToSectionSub('finance','expenses')">حذف</button></td></tr>`).join('')||'<tr><td colspan="5">لا توجد مصروفات</td></tr>'}</tbody></table></div></div>`;document.getElementById('dx-add').onclick=()=>{const a=Number(document.getElementById('dx-amount').value);if(!a)return alert('أدخل مبلغًا صحيحًا');addExpense({date:document.getElementById('dx-date').value,category:document.getElementById('dx-cat').value,description:document.getElementById('dx-desc').value,amount:a});renderDailyExpensesEnhanced(el)}};
  window.renderSecondarySales=function(el){const rows=scr();el.innerHTML=`<div class="card"><h3>مبيعات الخامات الثانوية والهوالك</h3><div class="small-note">تدخل هذه المبيعات مباشرة ضمن الإيرادات والمالية، ويمكن متابعتها منفصلة عن مبيعات المنتجات الأساسية.</div><div class="toolbar" style="flex-wrap:wrap"><input class="field" type="date" id="ss-date" value="${todayISO()}"><select class="field" id="ss-type"><option>نشارة خشب</option><option>هوالك خشب</option><option>خردة حديد</option><option>خردة بلاستيك</option><option>أخرى</option></select><input class="field" id="ss-customer" placeholder="اسم المشتري"><input class="field" id="ss-qty" type="number" placeholder="الكمية"><input class="field" id="ss-unit" type="number" placeholder="سعر الوحدة"><select class="field" id="ss-mode"><option value="cash">نقدي</option><option value="credit">آجل</option></select><button class="btn" id="ss-add">+ حفظ البيع</button></div></div><div class="card"><h3>سجل مبيعات الخامات الثانوية</h3><div class="scroll-table"><table><thead><tr><th>التاريخ</th><th>النوع</th><th>المشتري</th><th>الكمية</th><th>القيمة</th><th>السداد</th></tr></thead><tbody>${rows.slice().reverse().map(r=>`<tr><td>${r.date}</td><td>${esc(r.type)}</td><td>${esc(r.customer||'-')}</td><td>${r.qty||0}</td><td class="nums">${fmtEGP(r.amount)}</td><td>${r.payment_mode==='credit'?'آجل':'نقدي'}</td></tr>`).join('')||'<tr><td colspan="6">لا توجد مبيعات بعد</td></tr>'}</tbody></table></div></div>`;document.getElementById('ss-add').onclick=()=>{const qty=Number(document.getElementById('ss-qty').value),unit=Number(document.getElementById('ss-unit').value);if(!qty||!unit)return alert('أدخل الكمية والسعر');const r={id:uid('scrap'),date:document.getElementById('ss-date').value,type:document.getElementById('ss-type').value,customer:document.getElementById('ss-customer').value,qty,unit_price:unit,amount:qty*unit,payment_mode:document.getElementById('ss-mode').value,division:typeof CURRENT_DIVISION==='string'?CURRENT_DIVISION:'all'};rows.push(r);tx().push({id:uid('txn'),date:r.date,amount:r.amount,category:'بيع خامات ثانوية',side:'debit',desc:r.type+' - '+r.customer,payment_mode:r.payment_mode,division:r.division});saveStore();renderSecondarySales(el)}};
@@ -14914,8 +15011,10 @@ window.completeUserTask=id=>{ window.updateTaskStatus(id, 'تم'); };
     const followups = (STORE.followups||[]).filter(f=>!f.done)
       .map(f=>({type:'followup', id:f.id, title:f.title||'متابعة', meta:(f.customer?'العميل: '+f.customer:'') + (f.ref?' — '+f.ref:''), priority:f.priority||'عادية'}));
     const lowStock = getLowStock().map(r=>({type:'stock', id:r.item.id, title:'نقص وشيك - '+r.item.name, meta:'الرصيد الحالي: '+fmt(r.qty)+' — متبقي تقديرياً '+r.daysLeft+' يوم', priority: r.daysLeft<=7?'عاجلة':'مهمة'}));
+    const overLimit = (typeof getAllAccountsLight==='function'?getAllAccountsLight():[]).filter(a=>a.type==='customer' && a.credit_limit>0 && a.balance>a.credit_limit)
+      .map(a=>({type:'credit', id:a.sheet, title:'تجاوز حد الائتمان - '+a.name, meta:'الرصيد: '+fmtEGP(a.balance)+' — الحد المسموح: '+fmtEGP(a.credit_limit), priority:'عاجلة'}));
     const order = {'عاجلة':0,'مهمة':1,'عادية':2};
-    return overdue.concat(followups).concat(lowStock).sort((a,b)=>(order[a.priority]??3)-(order[b.priority]??3));
+    return overdue.concat(followups).concat(lowStock).concat(overLimit).sort((a,b)=>(order[a.priority]??3)-(order[b.priority]??3));
   }
   window.renderNotifPanel = function(){
     const items = getNotifications();
@@ -14925,11 +15024,11 @@ window.completeUserTask=id=>{ window.updateTaskStatus(id, 'تم'); };
     if(!panel) return;
     panel.innerHTML = '<h4>الإشعارات والمتابعات ('+items.length+')</h4>' + (items.length ? items.map(it=>`
       <div class="notif-item">
-        <div class="notif-title">${it.type==='overdue'?'💰 ':(it.type==='stock'?'📦 ':'📌 ')}${esc(it.title)}</div>
+        <div class="notif-title">${it.type==='overdue'?'💰 ':(it.type==='stock'?'📦 ':(it.type==='credit'?'💳 ':'📌 '))}${esc(it.title)}</div>
         <div class="notif-meta">${esc(it.meta)}</div>
         <div class="notif-actions">
           ${it.type==='followup' ? `<button onclick="completeFollowup('${it.id}'); window.toggleNotifPanel(false);">تمت المتابعة</button>` : ''}
-          <button onclick="window.toggleNotifPanel(false); ${it.type==='overdue' ? "goToSectionSub('finance','receivables_due')" : (it.type==='stock' ? "goTo('inventory')" : "goTo('sales')")};">فتح</button>
+          <button onclick="window.toggleNotifPanel(false); ${it.type==='overdue' ? "goToSectionSub('finance','receivables_due')" : (it.type==='stock' ? "goTo('inventory')" : (it.type==='credit' ? "goToSectionSub('customers','statement')" : "goTo('sales')"))};">فتح</button>
         </div>
       </div>
     `).join('') : '<div class="notif-empty">مفيش حاجة محتاجة انتباهك دلوقتي 👍</div>');
