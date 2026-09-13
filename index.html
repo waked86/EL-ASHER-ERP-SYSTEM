@@ -1906,7 +1906,7 @@ function addPurchaseOrder({supplier_sheet, supplier_name, date, expected_date, i
 }
 function markPOReceived(id){
   const po = STORE.purchase_orders.find(p=>p.id===id);
-  if(po){ po.status = 'تم الاستلام'; saveStore(); }
+  if(po){ po.status = 'تم الاستلام'; po.received_date = todayISO(); saveStore(); }
 }
 function cancelPO(id){
   const po = STORE.purchase_orders.find(p=>p.id===id);
@@ -6652,7 +6652,7 @@ function addPurchaseOrderMulti({date, expected_date, items, note}){
   saveStore();
   return doc_no;
 }
-function markPOReceived(id){ const po = STORE.purchase_orders.find(p=>p.id===id); if(po){ po.status='تم الاستلام'; saveStore(); } }
+function markPOReceived(id){ const po = STORE.purchase_orders.find(p=>p.id===id); if(po){ po.status='تم الاستلام'; po.received_date=todayISO(); saveStore(); } }
 function cancelPO(id){ const po = STORE.purchase_orders.find(p=>p.id===id); if(po){ po.status='ملغي'; saveStore(); } }
 function deletePO(id){ STORE.purchase_orders = STORE.purchase_orders.filter(p=>p.id!==id); saveStore(); }
 function convertPOToInvoice(id){
@@ -7197,10 +7197,11 @@ SECTIONS.sales = {title:"المبيعات", sub:"فاتورة جديدة، سن�
   {key:'targets', label:'الأهداف والتحقيق', render: renderTargetsSub},
 ]};
 
-SECTIONS.purchases = {title:"المشتريات", sub:"فاتورة مشتريات، أوامر الشراء (متعددة البنود والموردين)، الموردين", standalone:false, subs:[
+SECTIONS.purchases = {title:"المشتريات", sub:"فاتورة مشتريات، أوامر الشراء (متعددة البنود والموردين)، الموردين، تقييم أداء الموردين", standalone:false, subs:[
   {key:'invoice', label:'فاتورة مشتريات', render: renderPurchInvoiceSub},
   {key:'orders', label:'أوامر الشراء', render: renderPurchOrdersSub},
   {key:'suppliers', label:'الموردين', render: renderSuppliersSub},
+  {key:'supplier_performance', label:'تقييم أداء الموردين', render: renderSupplierPerformance},
 ]};
 
 SECTIONS.production = {title:"الإنتاج", sub:"تقارير الإنتاج وأوامر الإنتاج (بالعميل ومواعيد التسليم)", standalone:false, subs:[
@@ -7248,13 +7249,27 @@ function readImageAsCompressedBase64(file, maxWidth, quality){
     reader.readAsDataURL(file);
   });
 }
+function readFileAsBase64Plain(file){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = e => resolve(e.target.result);
+    reader.onerror = () => reject(new Error('تعذرت قراءة الملف'));
+    reader.readAsDataURL(file);
+  });
+}
 async function handleImageFilesToDraft(fileList, draftArray, onDone){
   const files = Array.from(fileList||[]);
   for(const file of files){
     try{
-      const dataUrl = await readImageAsCompressedBase64(file, 900, 0.65);
-      draftArray.push({id: uid('img'), name: file.name, data: dataUrl});
-    }catch(e){ console.error(e); }
+      const isPdf = file.type==='application/pdf' || /\.pdf$/i.test(file.name||'');
+      if(isPdf){
+        const dataUrl = await readFileAsBase64Plain(file);
+        draftArray.push({id: uid('img'), name: file.name, data: dataUrl, isPdf:true});
+      } else {
+        const dataUrl = await readImageAsCompressedBase64(file, 900, 0.65);
+        draftArray.push({id: uid('img'), name: file.name, data: dataUrl});
+      }
+    }catch(e){ console.error(e); alert('تعذر رفع الملف: '+(file.name||'')); }
   }
   onDone();
 }
@@ -7264,16 +7279,18 @@ function renderImageDraftThumbs(containerId, draftArray, removeFnName){
   el.innerHTML = draftArray.length ? `<div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:8px">
     ${draftArray.map((im,i)=>`
       <div style="position:relative;width:100px">
-        <img src="${im.data}" style="width:100px;height:100px;object-fit:cover;border-radius:8px;border:1px solid var(--line)">
+        ${im.isPdf
+          ? `<a href="${im.data}" target="_blank" style="display:flex;flex-direction:column;align-items:center;justify-content:center;width:100px;height:100px;border-radius:8px;border:1px solid var(--line);background:var(--paper);text-decoration:none;color:var(--danger);font-size:28px">📄<span style="font-size:9px;color:var(--slate);margin-top:4px;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${im.name||'PDF'}</span></a>`
+          : `<img src="${im.data}" style="width:100px;height:100px;object-fit:cover;border-radius:8px;border:1px solid var(--line)">`}
         <a href="javascript:void(0)" onclick="${removeFnName}(${i})" style="position:absolute;top:4px;left:4px;background:#fff;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;color:var(--danger);font-size:12px;box-shadow:0 1px 4px rgba(0,0,0,.2)">✕</a>
       </div>
     `).join('')}
-  </div>` : `<div class="small-note" style="margin-top:6px">لم تُضف صور بعد (اختياري - تساعد الفنيين والعميل على معرفة شكل المنتج/المعدة بالظبط)</div>`;
+  </div>` : `<div class="small-note" style="margin-top:6px">لم تُضف صور أو ملفات PDF بعد</div>`;
 }
 function imagesToPrintHTML(images){
   if(!images || !images.length) return '';
-  return `<h3>صور مرجعية</h3><div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:8px">
-    ${images.map(im=>`<img src="${im.data}" style="width:180px;height:180px;object-fit:cover;border-radius:6px;border:1px solid #ccc">`).join('')}
+  return `<h3>صور ومستندات مرجعية</h3><div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:8px">
+    ${images.map(im=>im.isPdf ? `<div style="width:180px;height:180px;display:flex;align-items:center;justify-content:center;border:1px solid #ccc;border-radius:6px;color:#666">📄 ${esc?esc(im.name||'PDF'):(im.name||'PDF')}</div>` : `<img src="${im.data}" style="width:180px;height:180px;object-fit:cover;border-radius:6px;border:1px solid #ccc">`).join('')}
   </div>`;
 }
 
@@ -7311,7 +7328,7 @@ function renderProductionOrders(el){
 
       <h4 style="margin:16px 0 8px;font-size:13.5px">صور مرجعية لشكل المنتج <span class="tag">تظهر عند الطباعة</span></h4>
       <div class="small-note" style="margin-bottom:8px">مفيدة كمرجع لفريق الإنتاج ولتأكيد الشكل مع العميل.</div>
-      <input type="file" id="po-image-input" accept="image/*" multiple class="field">
+      <input type="file" id="po-image-input" accept="image/*,.pdf,application/pdf" multiple class="field">
       <div id="po-image-thumbs"></div>
 
       <h4 style="margin:16px 0 8px;font-size:13.5px">جدول التسليم على دفعات (اختياري - لو العميل عايز يستلم الكمية على فترات)</h4>
@@ -7492,7 +7509,7 @@ function renderMaintenanceEstimateSub(el){
 
       <h4 style="margin:16px 0 8px;font-size:13.5px">صور المعدة <span class="tag">تظهر عند الطباعة</span></h4>
       <div class="small-note" style="margin-bottom:8px">مرجع لفني الصيانة ولحالة المعدة وقت الاستلام.</div>
-      <input type="file" id="mnt-image-input" accept="image/*" multiple class="field">
+      <input type="file" id="mnt-image-input" accept="image/*,.pdf,application/pdf" multiple class="field">
       <div id="mnt-image-thumbs"></div>
 
       <h4 style="margin:16px 0 8px;font-size:13.5px">بيان الأعمال / القطع المطلوبة</h4>
@@ -7998,6 +8015,46 @@ function renderCustStatementSub(el){
   }
 }
 
+/* ============ تقييم أداء الموردين: التزام بالمواعيد + ثبات الأسعار ============ */
+function renderSupplierPerformance(el){
+  const suppliers = getAllAccountsLight().filter(a=>a.type==='supplier');
+  const rows = suppliers.map(s=>{
+    const orders = STORE.purchase_orders.filter(o=>o.supplier_sheet===s.sheet || o.supplier_name===s.name);
+    const received = orders.filter(o=>o.status==='تم الاستلام' && o.received_date);
+    const withExpected = received.filter(o=>o.expected_date);
+    const onTime = withExpected.filter(o=>o.received_date<=o.expected_date);
+    const delays = withExpected.filter(o=>o.received_date>o.expected_date)
+      .map(o=>Math.round((new Date(o.received_date)-new Date(o.expected_date))/86400000));
+    const avgDelay = delays.length ? delays.reduce((a,b)=>a+b,0)/delays.length : 0;
+    const onTimePct = withExpected.length ? onTime.length/withExpected.length*100 : null;
+
+    const byItem = {};
+    orders.forEach(o=>{ if(!o.item_desc) return; const k=o.item_desc.trim().toLowerCase(); if(!byItem[k]) byItem[k]=[]; byItem[k].push(o.unit_price); });
+    let volatileItems = 0;
+    Object.values(byItem).forEach(prices=>{
+      if(prices.length<2) return;
+      const min=Math.min(...prices), max=Math.max(...prices);
+      if(min>0 && (max-min)/min > 0.1) volatileItems++;
+    });
+    const totalSpend = STORE.custom_txns.filter(t=>t.category==='فاتورة مشتريات' && t.sheet===s.sheet).reduce((sum,t)=>sum+Number(t.amount||0),0);
+
+    return {name:s.name, totalOrders:orders.length, onTimePct, avgDelay, volatileItems, totalSpend};
+  }).filter(r=>r.totalOrders>0 || r.totalSpend>0).sort((a,b)=>b.totalSpend-a.totalSpend);
+
+  el.innerHTML = `
+    <div class="section-eyebrow">🚚 تقييم أداء الموردين</div>
+    <div class="section-title">الالتزام بمواعيد التسليم وثبات الأسعار - عشان تفاضل بين مورديك بالأرقام</div>
+    <div class="card">
+      <div class="scroll-table" style="max-height:460px"><table><thead><tr><th>المورد</th><th>إجمالي المشتريات</th><th>عدد أوامر الشراء</th><th>نسبة الالتزام بالميعاد</th><th>متوسط أيام التأخير (لو اتأخر)</th><th>أصناف سعرها متذبذب (±10%+)</th></tr></thead><tbody>
+      ${rows.map(r=>`<tr><td style="font-weight:700">${r.name}</td><td class="nums">${fmtEGP(r.totalSpend)}</td><td class="nums">${fmt(r.totalOrders)}</td>
+      <td class="nums" style="font-weight:700;color:${r.onTimePct===null?'var(--slate)':(r.onTimePct>=80?'var(--success)':'var(--danger)')}">${r.onTimePct===null?'لا توجد بيانات مواعيد':fmt(r.onTimePct,0)+'%'}</td>
+      <td class="nums" style="color:${r.avgDelay>3?'var(--danger)':'var(--ink)'}">${r.avgDelay?fmt(r.avgDelay,1)+' يوم':'-'}</td>
+      <td class="nums" style="color:${r.volatileItems>0?'var(--danger)':'var(--success)'}">${r.volatileItems||'لا يوجد'}</td></tr>`).join('') || '<tr><td colspan="6" class="empty-note">لا توجد بيانات موردين كافية بعد</td></tr>'}
+      </tbody></table></div>
+    </div>
+    <div class="small-note" style="margin-top:10px">"نسبة الالتزام بالميعاد" محسوبة من أوامر الشراء اللي لها "تاريخ متوقع" وتم تسجيل استلامها فعليًا (من "أوامر الشراء" ← تم الاستلام). "الأصناف المتذبذبة" هي أي صنف اشتريته من نفس المورد بأكتر من سعر يختلف عن بعضه أكتر من 10%.</div>
+  `;
+}
 function renderSuppliersSub(el){
   const all = getAllAccountsLight();
   const suppliers = all.filter(a=>a.type==='supplier');
@@ -8883,7 +8940,7 @@ function renderProductionOrders(el){
       </div>
 
       <h4 style="margin:16px 0 8px;font-size:13.5px">صور مرجعية لشكل المنتج <span class="tag">تظهر عند الطباعة</span></h4>
-      <input type="file" id="po-image-input" accept="image/*" multiple class="field">
+      <input type="file" id="po-image-input" accept="image/*,.pdf,application/pdf" multiple class="field">
       <div id="po-image-thumbs"></div>
 
       <h4 style="margin:16px 0 8px;font-size:13.5px">جدول التسليم على دفعات (اختياري)</h4>
@@ -9379,7 +9436,7 @@ function renderMaintenanceEstimateSub(el){
       <input class="field" id="mnt-new-phone" placeholder="هاتف العميل الجديد (اختياري)" style="width:100%; margin-bottom:8px">
 
       <h4 style="margin:16px 0 8px;font-size:13.5px">صور المعدة <span class="tag">تظهر عند الطباعة</span></h4>
-      <input type="file" id="mnt-image-input" accept="image/*" multiple class="field">
+      <input type="file" id="mnt-image-input" accept="image/*,.pdf,application/pdf" multiple class="field">
       <div id="mnt-image-thumbs"></div>
 
       <h4 style="margin:16px 0 8px;font-size:13.5px">بيان الأعمال / القطع المطلوبة</h4>
@@ -10575,10 +10632,10 @@ function renderCustomerProfileSub(el){
         <input class="field" id="newcust-commno" placeholder="رقم السجل التجاري" style="flex:1;min-width:180px">
       </div>
       <h4 style="margin:16px 0 8px;font-size:13.5px">صورة السجل التجاري</h4>
-      <input type="file" id="newcust-comm-input" accept="image/*" multiple class="field">
+      <input type="file" id="newcust-comm-input" accept="image/*,.pdf,application/pdf" multiple class="field">
       <div id="newcust-comm-thumbs"></div>
       <h4 style="margin:16px 0 8px;font-size:13.5px">صورة البطاقة الضريبية</h4>
-      <input type="file" id="newcust-tax-input" accept="image/*" multiple class="field">
+      <input type="file" id="newcust-tax-input" accept="image/*,.pdf,application/pdf" multiple class="field">
       <div id="newcust-tax-thumbs"></div>
       <button class="btn" style="margin-top:14px" onclick="submitNewCustomerProfile()">حفظ العميل الجديد</button>
     </div>
@@ -10676,10 +10733,10 @@ function loadCustomerProfileForm(){
     ${p.contacts.map(c=>`<tr><td>${c.name}</td><td>${c.title||'-'}</td><td class="nums">${c.phone||'-'}</td><td class="nums">${c.email||'-'}</td></tr>`).join('')}
     </tbody></table>` : ''}
     <h4 style="margin:16px 0 8px;font-size:13.5px">صورة السجل التجاري</h4>
-    <input type="file" id="profedit-comm-input" accept="image/*" multiple class="field">
+    <input type="file" id="profedit-comm-input" accept="image/*,.pdf,application/pdf" multiple class="field">
     <div id="profedit-comm-thumbs"></div>
     <h4 style="margin:16px 0 8px;font-size:13.5px">صورة البطاقة الضريبية</h4>
-    <input type="file" id="profedit-tax-input" accept="image/*" multiple class="field">
+    <input type="file" id="profedit-tax-input" accept="image/*,.pdf,application/pdf" multiple class="field">
     <div id="profedit-tax-thumbs"></div>
     <button class="btn" style="margin-top:14px" onclick="submitProfileEdit()">حفظ التعديلات</button>
   `;
@@ -11257,7 +11314,7 @@ function renderImageLibrarySub(el){
         <select class="field" id="lib-upload-cat">${IMAGE_LIB_CATS.map(c=>`<option value="${c}">${c}</option>`).join('')}</select>
         <input class="field" id="lib-upload-label" placeholder="وصف/اسم الصورة (مثال: باليتة 100×120)" style="flex:1;min-width:200px">
       </div>
-      <input type="file" id="lib-upload-input" accept="image/*" multiple class="field" style="margin-top:8px">
+      <input type="file" id="lib-upload-input" accept="image/*,.pdf,application/pdf" multiple class="field" style="margin-top:8px">
       <div id="lib-upload-thumbs"></div>
       <button class="btn" style="margin-top:10px" onclick="submitLibraryUpload()">حفظ في المكتبة</button>
     </div>
@@ -11391,7 +11448,7 @@ function renderPriceQuoteSub(el){
 
       <h4 style="margin:16px 0 8px;font-size:13.5px">صور المنتج <span class="tag">تظهر عند الطباعة</span></h4>
       <div class="toolbar">
-        <input type="file" id="quo-image-input" accept="image/*" multiple class="field" style="flex:1">
+        <input type="file" id="quo-image-input" accept="image/*,.pdf,application/pdf" multiple class="field" style="flex:1">
         <button class="btn ghost" onclick="openImageLibraryPicker(function(im){ QUOTE_DRAFT_IMAGES.push(im); renderImageDraftThumbs('quo-image-thumbs', QUOTE_DRAFT_IMAGES, 'removeDraftQuoteImage'); })">📚 اختر من مكتبة الصور</button>
       </div>
       <div id="quo-image-thumbs"></div>
@@ -11585,7 +11642,7 @@ function renderMaintenanceEstimateSub(el){
 
       <h4 style="margin:16px 0 8px;font-size:13.5px">صور المعدة <span class="tag">تظهر عند الطباعة</span></h4>
       <div class="toolbar">
-        <input type="file" id="mnt-image-input" accept="image/*" multiple class="field" style="flex:1">
+        <input type="file" id="mnt-image-input" accept="image/*,.pdf,application/pdf" multiple class="field" style="flex:1">
         <button class="btn ghost" onclick="openImageLibraryPicker(function(im){ MNT_DRAFT_IMAGES_V2.push(im); renderImageDraftThumbs('mnt-image-thumbs', MNT_DRAFT_IMAGES_V2, 'removeDraftMntImageV2'); })">📚 اختر من مكتبة الصور</button>
       </div>
       <div id="mnt-image-thumbs"></div>
@@ -11816,7 +11873,7 @@ function renderProductionOrders(el){
 
       <h4 style="margin:16px 0 8px;font-size:13.5px">صور مرجعية لشكل المنتج <span class="tag">تظهر عند الطباعة</span></h4>
       <div class="toolbar">
-        <input type="file" id="po-image-input" accept="image/*" multiple class="field" style="flex:1">
+        <input type="file" id="po-image-input" accept="image/*,.pdf,application/pdf" multiple class="field" style="flex:1">
         <button class="btn ghost" onclick="openImageLibraryPicker(function(im){ PROD_DRAFT_IMAGES.push(im); renderImageDraftThumbs('po-image-thumbs', PROD_DRAFT_IMAGES, 'removeDraftProdImage'); })">📚 اختر من مكتبة الصور</button>
       </div>
       <div id="po-image-thumbs"></div>
@@ -13022,10 +13079,10 @@ function renderCustomerProfileSub(el){
         <input class="field" id="newcust-commno" placeholder="رقم السجل التجاري" style="flex:1;min-width:180px">
       </div>
       <h4 style="margin:16px 0 8px;font-size:13.5px">صورة السجل التجاري</h4>
-      <input type="file" id="newcust-comm-input" accept="image/*" multiple class="field">
+      <input type="file" id="newcust-comm-input" accept="image/*,.pdf,application/pdf" multiple class="field">
       <div id="newcust-comm-thumbs"></div>
       <h4 style="margin:16px 0 8px;font-size:13.5px">صورة البطاقة الضريبية</h4>
-      <input type="file" id="newcust-tax-input" accept="image/*" multiple class="field">
+      <input type="file" id="newcust-tax-input" accept="image/*,.pdf,application/pdf" multiple class="field">
       <div id="newcust-tax-thumbs"></div>
       <button class="btn" style="margin-top:14px" onclick="submitNewCustomerProfile()">حفظ العميل الجديد</button>
     </div>
@@ -13590,9 +13647,9 @@ function renderEquipmentReceiptSub(el){
           <input class="field" id="eqr-new-commno" placeholder="رقم السجل التجاري" style="flex:1;min-width:180px">
         </div>
         <h4 style="margin:14px 0 6px;font-size:13px">صورة السجل التجاري</h4>
-        <input type="file" id="eqr-comm-input" accept="image/*" multiple class="field"><div id="eqr-comm-thumbs"></div>
+        <input type="file" id="eqr-comm-input" accept="image/*,.pdf,application/pdf" multiple class="field"><div id="eqr-comm-thumbs"></div>
         <h4 style="margin:14px 0 6px;font-size:13px">صورة البطاقة الضريبية</h4>
-        <input type="file" id="eqr-tax-input" accept="image/*" multiple class="field"><div id="eqr-tax-thumbs"></div>
+        <input type="file" id="eqr-tax-input" accept="image/*,.pdf,application/pdf" multiple class="field"><div id="eqr-tax-thumbs"></div>
       </div>
       <h4 style="margin:16px 0 8px;font-size:13.5px">بيانات المعدة</h4>
       <div class="toolbar" style="flex-wrap:wrap">
@@ -13602,7 +13659,7 @@ function renderEquipmentReceiptSub(el){
       <textarea class="field" id="eqr-condition-notes" placeholder="حالة المعدة وقت الاستلام (اختياري)" style="width:100%; min-height:60px; margin-top:8px; font-family:'Cairo'; padding:9px 12px; border:1px solid var(--line); border-radius:8px;"></textarea>
       <h4 style="margin:16px 0 8px;font-size:13.5px">صور المعدة وقت الاستلام</h4>
       <div class="toolbar">
-        <input type="file" id="eqr-image-input" accept="image/*" multiple class="field" style="flex:1">
+        <input type="file" id="eqr-image-input" accept="image/*,.pdf,application/pdf" multiple class="field" style="flex:1">
         <button class="btn ghost" onclick="openImageLibraryPicker(function(im){ EQR_DRAFT_IMAGES.push(im); renderImageDraftThumbs('eqr-image-thumbs', EQR_DRAFT_IMAGES, 'removeEqrImage'); })">📚 من المكتبة</button>
       </div>
       <div id="eqr-image-thumbs"></div>
@@ -13783,6 +13840,47 @@ function promptClearAllData(){
 }
 SECTIONS.sales.subs.splice(2, 0, {key:'equipment_receipt', label:'إذن استلام معدة', render: renderEquipmentReceiptSub});
 SECTIONS.finance.subs.push({key:'settings', label:'إعدادات النظام', render: renderSystemSettingsSub});
+SECTIONS.finance.subs.push({key:'breakeven', label:'نقطة التعادل الشهرية', render: renderBreakEvenSub});
+function renderBreakEvenSub(el){
+  const salariesTotal = (STORE.employees||[]).filter(e=>e.active!==false).reduce((s,e)=>s+Number(e.monthly_salary||0)+Number(e.allowances||0),0);
+  const lm = lastMonthPeriod();
+  const finLast = getFinanceSummary(lm.year, lm.month);
+  const expLast = STORE.expenses.filter(e=>e.date && e.date.startsWith(lm.year+'-'+String(lm.month).padStart(2,'0')));
+  const rentUtil = expLast.filter(e=>['إيجارات','كهرباء ومرافق'].includes(e.category)).reduce((s,e)=>s+Number(e.amount||0),0);
+  const suggestedFixed = salariesTotal + rentUtil;
+  const estimatedMarginPct = finLast.salesActual>0 ? Math.max(5, Math.min(90, (finLast.salesActual - finLast.purchases)/finLast.salesActual*100)) : 30;
+
+  el.innerHTML = `
+    <div class="section-eyebrow">⚖️ نقطة التعادل الشهرية</div>
+    <div class="section-title">عايز تبيع بكام شهريًا عشان تغطي مصاريفك الثابتة قبل ما تبدأ تكسب فعليًا</div>
+    <div class="card">
+      <div class="toolbar" style="flex-wrap:wrap">
+        <label class="small-note" style="min-width:220px">التكاليف الثابتة الشهرية (رواتب + إيجار + مرافق)
+          <input class="field" type="number" id="be-fixed" value="${suggestedFixed.toFixed(0)}">
+        </label>
+        <label class="small-note" style="min-width:220px">نسبة هامش الربح التقديرية %
+          <input class="field" type="number" id="be-margin" value="${estimatedMarginPct.toFixed(0)}">
+        </label>
+        <button class="btn" style="align-self:flex-end" onclick="runBreakEven()">احسب</button>
+      </div>
+      <div class="small-note" style="margin-top:6px">القيم المقترحة محسوبة تلقائيًا من إجمالي رواتب موظفيك النشطين + مصروفات الإيجار والمرافق الشهر اللي فات، ونسبة الهامش من مبيعات الشهر اللي فات. عدّلها براحتك لو عندك رقم أدق.</div>
+      <div id="be-result" style="margin-top:14px"></div>
+    </div>
+  `;
+  runBreakEven();
+}
+function runBreakEven(){
+  const fixed = Number(document.getElementById('be-fixed').value)||0;
+  const marginPct = Number(document.getElementById('be-margin').value)||1;
+  const breakEvenRevenue = fixed / (marginPct/100);
+  document.getElementById('be-result').innerHTML = `
+    <div class="kpi-row">
+      <div class="kpi"><div class="lbl">إجمالي المبيعات المطلوبة شهريًا لتغطية التكاليف (نقطة التعادل)</div><div class="val" style="color:var(--wood)">${fmtEGP(breakEvenRevenue)}</div></div>
+      <div class="kpi"><div class="lbl">يعني تقريبًا يوميًا (30 يوم عمل)</div><div class="val">${fmtEGP(breakEvenRevenue/30)}</div></div>
+    </div>
+    <div class="small-note">أي مبيعات فوق الرقم ده = ربح صافي تقريبي. أي مبيعات تحته = بتغطي جزء بس من مصاريفك الثابتة.</div>
+  `;
+}
 
 
 /* ===== custom/hr_overtime_penalties.js ===== */
@@ -14729,7 +14827,7 @@ goTo('overview');
   window.hrRemoveDoc=i=>{draftDocs.splice(i,1);const e=editing||{};document.getElementById('hr-doc-list').innerHTML=draftDocs.map((d,j)=>`<span class="pill slate" style="margin:3px">${esc(d.name)} <button type="button" onclick="window.hrRemoveDoc(${j})">×</button></span>`).join('')};
   function formHTML(e={}){return `<div class="toolbar" style="flex-wrap:wrap">${fields.map(([k,l])=>{let type=['birth_date','hire_date'].includes(k)?'date':['monthly_salary','allowances'].includes(k)?'number':'text';let val=e[k]||'';if(k==='production_line')return `<label class="small-note" style="min-width:190px">${l}<select class="field" id="hr-${k}" style="width:190px"><option value="">اختر</option>${lines.map(x=>`<option ${x===val?'selected':''}>${x}</option>`).join('')}</select></label>`;if(k==='shift')return `<label class="small-note" style="min-width:150px">${l}<select class="field" id="hr-${k}"><option ${val==='صباحي'?'selected':''}>صباحي</option><option ${val==='مسائي'?'selected':''}>مسائي</option><option ${val==='ليلي'?'selected':''}>ليلي</option></select></label>`;return `<label class="small-note" style="min-width:150px">${l}<input class="field" id="hr-${k}" type="${type}" value="${esc(val)}" placeholder="${l}"></label>`}).join('')}</div>${docsHTML(e)}`}
   function collect(){const e={id:editing?.id||uid('emp'),code:editing?.code||nextEntityCode('emp_code','EMP'),active:editing?.active!==false};fields.forEach(([k])=>{const x=document.getElementById('hr-'+k);e[k]=x?.value||''});e.monthly_salary=Number(e.monthly_salary||0);e.allowances=Number(e.allowances||0);e.documents=draftDocs;return e}
-  window.openHRForm=(id)=>{editing=id?STORE.employees.find(x=>x.id===id):null;draftDocs=(editing?.documents||[]).slice();const box=document.getElementById('hr-form-box');if(!box)return;box.innerHTML=`<h3>${editing?'تعديل بيانات الموظف':'إضافة موظف جديد'}</h3>${formHTML(editing||{})}<button class="btn" id="hr-save">حفظ بيانات الموظف</button><button class="btn ghost" onclick="window.openHRForm()">إلغاء</button>`;document.getElementById('hr-save').onclick=()=>{if(!canHR(editing?'edit':'create'))return alert('ليس لديك صلاحية تعديل بيانات الموظفين');const e=collect();const i=STORE.employees.findIndex(x=>x.id===e.id);if(i>=0)STORE.employees[i]=e;else STORE.employees.push(e);saveStore();alert('تم حفظ بيانات الموظف');renderHREmployeesSub(document.getElementById('content'))};document.getElementById('hr-docs')?.addEventListener('change',async ev=>{if(!canHR('docs'))return;for(const f of ev.target.files){try{const data=await readImageAsCompressedBase64(f,1000,.65);draftDocs.push({name:f.name,data})}catch(_){}}window.openHRForm(editing?.id)});};
+  window.openHRForm=(id)=>{editing=id?STORE.employees.find(x=>x.id===id):null;draftDocs=(editing?.documents||[]).slice();const box=document.getElementById('hr-form-box');if(!box)return;box.innerHTML=`<h3>${editing?'تعديل بيانات الموظف':'إضافة موظف جديد'}</h3>${formHTML(editing||{})}<button class="btn" id="hr-save">حفظ بيانات الموظف</button><button class="btn ghost" onclick="window.openHRForm()">إلغاء</button>`;document.getElementById('hr-save').onclick=()=>{if(!canHR(editing?'edit':'create'))return alert('ليس لديك صلاحية تعديل بيانات الموظفين');const e=collect();const i=STORE.employees.findIndex(x=>x.id===e.id);if(i>=0)STORE.employees[i]=e;else STORE.employees.push(e);saveStore();alert('تم حفظ بيانات الموظف');renderHREmployeesSub(document.getElementById('content'))};document.getElementById('hr-docs')?.addEventListener('change',async ev=>{if(!canHR('docs'))return;for(const f of ev.target.files){try{const isPdf=f.type==='application/pdf'||/\.pdf$/i.test(f.name||'');const data=isPdf?await readFileAsBase64Plain(f):await readImageAsCompressedBase64(f,1000,.65);draftDocs.push({name:f.name,data,isPdf})}catch(_){alert('تعذر رفع الملف: '+(f.name||''))}}window.openHRForm(editing?.id)});};
   window.deleteHRComplete=id=>{if(!canHR('delete'))return alert('ليس لديك صلاحية حذف الموظفين');if(!confirm('حذف الموظف ومستنداته نهائياً؟'))return;STORE.employees=STORE.employees.filter(e=>e.id!==id);STORE.attendance=STORE.attendance.filter(a=>a.emp_id!==id);saveStore();renderHREmployeesSub(document.getElementById('content'))};
   window.renderHREmployeesSub=function(el){const emps=STORE.employees||[];el.innerHTML=`<div class="kpi-row"><div class="kpi"><div class="lbl">عدد الموظفين</div><div class="val">${fmt(emps.length)}</div></div><div class="kpi"><div class="lbl">الموظفون النشطون</div><div class="val">${fmt(emps.filter(e=>e.active!==false).length)}</div></div><div class="kpi"><div class="lbl">إجمالي الرواتب والبدلات</div><div class="val">${fmtEGP(emps.reduce((s,e)=>s+Number(e.monthly_salary||0)+Number(e.allowances||0),0))}</div></div></div><div id="hr-form-box" class="card"></div><div class="card" style="margin-top:16px"><div class="toolbar"><input class="field" id="hr-search" placeholder="بحث بالاسم أو الكود أو القسم أو خط الإنتاج..."><button class="btn" onclick="openHRForm()" ${canHR('create')?'':'disabled'}>+ إضافة موظف</button></div><div class="scroll-table"><table><thead><tr><th>الكود</th><th>الاسم</th><th>القسم / خط الإنتاج</th><th>الوظيفة</th><th>الهاتف</th><th>التأمينات</th><th>الضرائب</th><th>الحالة</th><th></th></tr></thead><tbody id="hr-body"></tbody></table></div></div>`;const render=()=>{const q=(document.getElementById('hr-search').value||'').trim();document.getElementById('hr-body').innerHTML=emps.filter(e=>!q||Object.values(e).join(' ').includes(q)).map(e=>`<tr><td>${esc(e.code)}</td><td>${esc(e.name)}</td><td>${esc(e.department||'-')} / ${esc(e.production_line||'-')}</td><td>${esc(e.role||'-')}</td><td>${esc(e.phone||'-')}</td><td>${esc(e.insurance_number||'-')}</td><td>${esc(e.tax_file_number||'-')}</td><td>${e.active===false?'موقوف':'نشط'}</td><td><button class="btn ghost" onclick="openHRForm('${e.id}')" ${canHR('edit')?'':'disabled'}>تعديل</button><button class="btn ghost" onclick="deleteHRComplete('${e.id}')" ${canHR('delete')?'':'disabled'}>حذف</button></td></tr>`).join('')||'<tr><td colspan="9">لا يوجد موظفون</td></tr>'};document.getElementById('hr-search').oninput=render;render()};
   const oldAtt=window.renderHRAttendanceSub;window.renderHRAttendanceSub=function(el){oldAtt(el);const note=document.createElement('div');note.className='small-note';note.style.margin='8px 0';note.textContent='خط الإنتاج والقسم محفوظان مع كل موظف ويظهران في كشف الحضور. استخدم البحث أو افتح بيانات الموظف للتفاصيل.';el.prepend(note);el.querySelectorAll('button').forEach(b=>{if(!canHR('attendance')){b.disabled=true;b.title='لا توجد صلاحية الحضور والانصراف'}})};
