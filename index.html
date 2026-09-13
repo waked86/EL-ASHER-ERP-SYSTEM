@@ -1041,6 +1041,55 @@ function currentMonthPeriod(){
   const d = new Date();
   return {year: d.getFullYear(), month: d.getMonth()+1};
 }
+/* -------- توقع التدفق النقدي القادم -------- */
+function renderCashFlowForecast(el){
+  const weeks = 8;
+  const today = new Date();
+  const buckets = [];
+  for(let i=0;i<weeks;i++){
+    const start = new Date(today); start.setDate(start.getDate()+i*7);
+    const end = new Date(start); end.setDate(end.getDate()+6);
+    buckets.push({label:'أسبوع '+(i+1)+' ('+start.toLocaleDateString('ar-EG',{day:'numeric',month:'short'})+')', start: start.toISOString().slice(0,10), end: end.toISOString().slice(0,10), inflow:0, outflow:0});
+  }
+  // التدفقات الداخلة: فواتير آجلة لسه ماتحصلتش وتاريخ استحقاقها في المدى ده
+  (STORE.custom_txns||[]).filter(t=>(t.category==='فاتورة بيع'||t.category==='فاتورة صيانة') && t.payment_mode==='credit' && !t.paid && t.due_date)
+    .forEach(t=>{
+      const b = buckets.find(bk=>t.due_date>=bk.start && t.due_date<=bk.end);
+      if(b) b.inflow += Number(t.amount)||0;
+    });
+  // التدفقات الخارجة الثابتة: إجمالي الرواتب شهريًا مقسومة على 4.33 أسبوع + أقساط القروض الشخصية المستحقة
+  const weeklySalaries = (STORE.employees||[]).filter(e=>e.active!==false).reduce((s,e)=>s+Number(e.monthly_salary||0)+Number(e.allowances||0),0) / 4.33;
+  buckets.forEach(b=> b.outflow += weeklySalaries);
+  const activeLoans = (STORE.personal_loans||[]).filter(l=>{
+    const paid = (l.payments||[]).reduce((s,p)=>s+p.amount,0);
+    return paid < l.principal;
+  });
+  const weeklyLoanInstallments = activeLoans.reduce((s,l)=>s+Number(l.monthly_installment||0),0) / 4.33;
+  buckets.forEach(b=> b.outflow += weeklyLoanInstallments);
+  // متوسط مصروفات تشغيلية أسبوعية من آخر 3 شهور فعليًا
+  const threeMonthsAgo = new Date(); threeMonthsAgo.setMonth(threeMonthsAgo.getMonth()-3);
+  const recentExpenses = (STORE.expenses||[]).filter(e=>e.date && e.date>=threeMonthsAgo.toISOString().slice(0,10));
+  const weeklyAvgExpense = recentExpenses.reduce((s,e)=>s+Number(e.amount||0),0) / 13; // ~13 أسبوع في 3 شهور
+  buckets.forEach(b=> b.outflow += weeklyAvgExpense);
+
+  let running = 0;
+  buckets.forEach(b=>{ b.net = b.inflow - b.outflow; running += b.net; b.cumulative = running; });
+
+  el.innerHTML = `
+    <div class="section-eyebrow">🔮 توقع التدفق النقدي القادم</div>
+    <div class="section-title">تقدير مبسط لأسبوعين شهرين قادمين: تحصيلات متوقعة من فواتير آجلة، مقابل التزامات شبه ثابتة (رواتب + أقساط قروض) ومتوسط المصروفات التشغيلية</div>
+    <div class="card">
+      <div class="scroll-table"><table><thead><tr><th>الفترة</th><th>تحصيل متوقع (فواتير آجلة مستحقة)</th><th>التزامات متوقعة (رواتب+أقساط+مصروفات)</th><th>الصافي</th><th>الرصيد التراكمي المتوقع</th></tr></thead><tbody>
+      ${buckets.map(b=>`<tr><td>${b.label}</td><td class="nums" style="color:var(--success)">${fmtEGP(b.inflow)}</td><td class="nums" style="color:var(--danger)">${fmtEGP(b.outflow)}</td>
+      <td class="nums" style="font-weight:700;color:${b.net>=0?'var(--success)':'var(--danger)'}">${fmtEGP(b.net)}</td>
+      <td class="nums" style="font-weight:800;color:${b.cumulative>=0?'var(--navy)':'var(--danger)'}">${fmtEGP(b.cumulative)}</td></tr>`).join('')}
+      </tbody></table></div>
+    </div>
+    <div class="small-note" style="margin-top:10px">
+      "الالتزامات المتوقعة" تقديرية: إجمالي الرواتب الشهرية مقسّم على 4.33 أسبوع + أقساط القروض الشخصية الشهرية الجارية + متوسط المصروفات اليومية الفعلي لآخر 3 شهور. مش شامل مصروفات استثنائية أو مشتريات كبيرة متوقعة. لو الرصيد التراكمي بيبان بالسالب في أسبوع معين، ده معناه محتاج تجهز سيولة قبلها.
+    </div>
+  `;
+}
 /* -------- التقرير اليومي (تحليل اليوم) - ملخص شامل لكل حركة في اليوم المختار -------- */
 function renderDailyReport(el){
   renderDailyReportBody(el, todayISO());
@@ -1523,6 +1572,25 @@ function renderFinanceBody(el, periodSel){
       <div class="kpi"><div class="lbl">صافي التدفق النقدي التقديري</div><div class="val" style="color:${fin.netCash>=0?'var(--success)':'var(--danger)'}">${fmtEGP(fin.netCash)}</div>
         <div class="delta" style="color:var(--slate)">تحصيل - مشتريات - مصروفات</div></div>
     </div>
+    ${mf ? (function(){
+      const prevM = mf===1 ? {y:yf-1, m:12} : {y:yf, m:mf-1};
+      const finPrev = getFinanceSummary(prevM.y, prevM.m);
+      const finYearAgo = getFinanceSummary(yf-1, mf);
+      const pct = (cur, prev) => prev>0 ? (((cur-prev)/prev)*100) : (cur>0?100:0);
+      const cmp = (label, key) => {
+        const p1 = pct(fin[key], finPrev[key]), p2 = pct(fin[key], finYearAgo[key]);
+        const arrow = p=> p>=0 ? `<span style="color:var(--success)">▲ ${fmt(Math.abs(p),1)}%</span>` : `<span style="color:var(--danger)">▼ ${fmt(Math.abs(p),1)}%</span>`;
+        return `<tr><td>${label}</td><td class="nums">${fmtEGP(finPrev[key])}</td><td class="nums">${arrow(p1)}</td><td class="nums">${fmtEGP(finYearAgo[key])}</td><td class="nums">${arrow(p2)}</td></tr>`;
+      };
+      return `<div class="card" style="margin-top:16px">
+        <h3>مقارنة تلقائية: ${periodLabel}</h3>
+        <div class="scroll-table"><table><thead><tr><th></th><th>الشهر السابق (${AR_MONTHS[prevM.m-1]} ${prevM.y})</th><th>التغيّر</th><th>نفس الشهر السنة اللي فاتت</th><th>التغيّر</th></tr></thead><tbody>
+        ${cmp('المبيعات','salesActual')}
+        ${cmp('التحصيل','collectionActual')}
+        ${cmp('المصروفات','expenses')}
+        </tbody></table></div>
+      </div>`;
+    })() : ''}
 
     <div class="grid-2">
       <div class="card"><h3>توزيع المصروفات حسب النوع</h3><canvas id="chart-fin-exp" height="115"></canvas></div>
@@ -14881,7 +14949,7 @@ window.completeUserTask=id=>{ window.updateTaskStatus(id, 'تم'); };
  window.renderReceivablesDue=function(el){const rows=tx().filter(t=>(t.category==='فاتورة بيع'||t.category==='فاتورة صيانة')&&t.payment_mode==='credit'&&!t.paid);const now=todayISO();const open=rows.filter(t=>(t.due_date||'')>=now),late=rows.filter(t=>(t.due_date||'')<now);el.innerHTML=`<div class="kpi-row"><div class="kpi"><div class="lbl">إجمالي الآجل المفتوح</div><div class="val">${fmtEGP(rows.reduce((s,t)=>s+Number(t.amount||0),0))}</div></div><div class="kpi"><div class="lbl">مستحق ولم يُسدّد</div><div class="val" style="color:var(--danger)">${fmtEGP(late.reduce((s,t)=>s+Number(t.amount||0),0))}</div></div><div class="kpi"><div class="lbl">لم يحن موعده</div><div class="val" style="color:var(--success)">${fmtEGP(open.reduce((s,t)=>s+Number(t.amount||0),0))}</div></div></div><div class="card"><h3>تقرير الفواتير الآجلة والاستحقاقات</h3><div class="small-note">الاستحقاق = تاريخ الفاتورة + مدة الائتمان. عند التحصيل يتم إغلاق الفاتورة من خلال تسجيل التحصيل المرتبط بالحساب.</div><div class="scroll-table"><table><thead><tr><th>الفاتورة</th><th>العميل</th><th>تاريخ الفاتورة</th><th>مدة الائتمان</th><th>الاستحقاق</th><th>القيمة</th><th>الحالة</th></tr></thead><tbody>${rows.sort((a,b)=>(a.due_date||'').localeCompare(b.due_date||'')).map(t=>{const a=getAllAccountsLight().find(x=>x.sheet===t.sheet);const late=(t.due_date||'')<now;return `<tr><td>${esc(t.doc_no||'-')}</td><td>${esc(a?.name||t.sheet||'-')}</td><td>${t.date||'-'}</td><td>${t.credit_days||0} يوم</td><td>${t.due_date||'-'}</td><td class="nums">${fmtEGP(t.amount)}</td><td><span class="pill ${late?'red':'green'}">${late?'متأخر':'مفتوح'}</span></td></tr>`}).join('')||'<tr><td colspan="7">لا توجد فواتير آجلة مفتوحة</td></tr>'}</tbody></table></div></div>`};
  window.renderDailyExpensesEnhanced=function(el){const es=STORE.expenses||[];el.innerHTML=`<div class="kpi-row"><div class="kpi"><div class="lbl">مصروفات الشهر</div><div class="val" style="color:var(--danger)">${fmtEGP(es.filter(e=>(e.date||'').startsWith(todayISO().slice(0,7))).reduce((s,e)=>s+Number(e.amount||0),0))}</div></div><div class="kpi"><div class="lbl">عدد القيود</div><div class="val">${es.length}</div></div></div><div class="card"><h3>المصروفات اليومية</h3><div class="toolbar" style="flex-wrap:wrap"><input class="field" type="date" id="dx-date" value="${todayISO()}"><select class="field" id="dx-cat">${EXPENSE_CATS.map(c=>`<option>${c}</option>`).join('')}</select><input class="field" id="dx-desc" placeholder="بيان واضح للمصروف" style="flex:1"><input class="field" type="number" id="dx-amount" placeholder="المبلغ"><button class="btn" id="dx-add">+ تسجيل مصروف</button></div><div class="scroll-table"><table><thead><tr><th>التاريخ</th><th>التصنيف</th><th>البيان</th><th>المبلغ</th><th></th></tr></thead><tbody>${es.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(e=>`<tr><td>${e.date}</td><td>${esc(e.category)}</td><td>${esc(e.description||'-')}</td><td class="nums">${fmtEGP(e.amount)}</td><td><button class="btn ghost" onclick="deleteExpense('${e.id}');goToSectionSub('finance','expenses')">حذف</button></td></tr>`).join('')||'<tr><td colspan="5">لا توجد مصروفات</td></tr>'}</tbody></table></div></div>`;document.getElementById('dx-add').onclick=()=>{const a=Number(document.getElementById('dx-amount').value);if(!a)return alert('أدخل مبلغًا صحيحًا');addExpense({date:document.getElementById('dx-date').value,category:document.getElementById('dx-cat').value,description:document.getElementById('dx-desc').value,amount:a});renderDailyExpensesEnhanced(el)}};
  window.renderSecondarySales=function(el){const rows=scr();el.innerHTML=`<div class="card"><h3>مبيعات الخامات الثانوية والهوالك</h3><div class="small-note">تدخل هذه المبيعات مباشرة ضمن الإيرادات والمالية، ويمكن متابعتها منفصلة عن مبيعات المنتجات الأساسية.</div><div class="toolbar" style="flex-wrap:wrap"><input class="field" type="date" id="ss-date" value="${todayISO()}"><select class="field" id="ss-type"><option>نشارة خشب</option><option>هوالك خشب</option><option>خردة حديد</option><option>خردة بلاستيك</option><option>أخرى</option></select><input class="field" id="ss-customer" placeholder="اسم المشتري"><input class="field" id="ss-qty" type="number" placeholder="الكمية"><input class="field" id="ss-unit" type="number" placeholder="سعر الوحدة"><select class="field" id="ss-mode"><option value="cash">نقدي</option><option value="credit">آجل</option></select><button class="btn" id="ss-add">+ حفظ البيع</button></div></div><div class="card"><h3>سجل مبيعات الخامات الثانوية</h3><div class="scroll-table"><table><thead><tr><th>التاريخ</th><th>النوع</th><th>المشتري</th><th>الكمية</th><th>القيمة</th><th>السداد</th></tr></thead><tbody>${rows.slice().reverse().map(r=>`<tr><td>${r.date}</td><td>${esc(r.type)}</td><td>${esc(r.customer||'-')}</td><td>${r.qty||0}</td><td class="nums">${fmtEGP(r.amount)}</td><td>${r.payment_mode==='credit'?'آجل':'نقدي'}</td></tr>`).join('')||'<tr><td colspan="6">لا توجد مبيعات بعد</td></tr>'}</tbody></table></div></div>`;document.getElementById('ss-add').onclick=()=>{const qty=Number(document.getElementById('ss-qty').value),unit=Number(document.getElementById('ss-unit').value);if(!qty||!unit)return alert('أدخل الكمية والسعر');const r={id:uid('scrap'),date:document.getElementById('ss-date').value,type:document.getElementById('ss-type').value,customer:document.getElementById('ss-customer').value,qty,unit_price:unit,amount:qty*unit,payment_mode:document.getElementById('ss-mode').value,division:typeof CURRENT_DIVISION==='string'?CURRENT_DIVISION:'all'};rows.push(r);tx().push({id:uid('txn'),date:r.date,amount:r.amount,category:'بيع خامات ثانوية',side:'debit',desc:r.type+' - '+r.customer,payment_mode:r.payment_mode,division:r.division});saveStore();renderSecondarySales(el)}};
- setTimeout(()=>{if(typeof SECTIONS!=='undefined'&&SECTIONS.finance){SECTIONS.finance.subs.push({key:'receivables_due',label:'الآجل والاستحقاقات',render:renderReceivablesDue},{key:'expenses',label:'المصروفات اليومية',render:renderDailyExpensesEnhanced},{key:'secondary_sales',label:'مبيعات الخامات الثانوية',render:renderSecondarySales})}},0);
+ setTimeout(()=>{if(typeof SECTIONS!=='undefined'&&SECTIONS.finance){SECTIONS.finance.subs.push({key:'receivables_due',label:'الآجل والاستحقاقات',render:renderReceivablesDue},{key:'expenses',label:'المصروفات اليومية',render:renderDailyExpensesEnhanced},{key:'secondary_sales',label:'مبيعات الخامات الثانوية',render:renderSecondarySales},{key:'cashflow',label:'توقع التدفق النقدي',render:renderCashFlowForecast})}},0);
 })();
 </script>
 <script>
